@@ -69,11 +69,11 @@ else:
     excel_files = glob.glob(os.path.join(DATA_DIR, "Classifica week *.xlsx"))
     valid_files = []
     for file_path in excel_files:
-        match = re.search(r'week(\d+)', os.path.basename(file_path), re.IGNORECASE)
+        match = re.search(r'week (\d+)', os.path.basename(file_path), re.IGNORECASE)
         if match:
             valid_files.append((file_path, int(match.group(1))))
         else:
-            st.warning(f"Nome file non valido (pattern 'week<numero>' non trovato): {os.path.basename(file_path)}")
+            st.warning(f"Nome file non valido (pattern 'week <numero>' non trovato): {os.path.basename(file_path)}")
     # Ordina per numero settimana
     excel_files = [f[0] for f in sorted(valid_files, key=lambda x: x[1])]
     for file_path in excel_files:
