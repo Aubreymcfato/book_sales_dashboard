@@ -66,19 +66,17 @@ dataframes = {}
 if not os.path.exists(DATA_DIR):
     st.error(f"Cartella {DATA_DIR} non trovata.")
 else:
-    excel_files = glob.glob(os.path.join(DATA_DIR, "Classifica week *.xlsx"))
+    excel_files = glob.glob(os.path.join(DATA_DIR, "Classifica week*.xlsx"))
     valid_files = []
     for file_path in excel_files:
-        match = re.search(r'week (\d+)', os.path.basename(file_path), re.IGNORECASE)
+        match = re.search(r'week\s*(\d+)', os.path.basename(file_path), re.IGNORECASE)
         if match:
             valid_files.append((file_path, int(match.group(1))))
         else:
             st.warning(f"Nome file non valido (pattern 'week <numero>' non trovato): {os.path.basename(file_path)}")
     # Ordina per numero settimana
-    excel_files = [f[0] for f in sorted(valid_files, key=lambda x: x[1])]
-    for file_path in excel_files:
+    for file_path, week_num in sorted(valid_files, key=lambda x: x[1]):
         try:
-            week_num = re.search(r'week(\d+)', os.path.basename(file_path), re.IGNORECASE).group(1)
             df = load_data(file_path)
             if df is not None:
                 dataframes[f"Settimana {week_num}"] = df
@@ -86,7 +84,7 @@ else:
             st.warning(f"Errore nel processing del file: {os.path.basename(file_path)}: {e}")
 
 if dataframes:
-    selected_week = st.sidebar.selectbox("Seleziona la settimana", sorted(dataframes.keys(), key=lambda x: int(re.search(r'Settimana (\d+)', x, re.IGNORECASE).group(1))))
+    selected_week = st.sidebar.selectbox("Seleziona la settimana", sorted(dataframes.keys(), key=lambda x: int(re.search(r'Settimana\s*(\d+)', x, re.IGNORECASE).group(1))))
     df = dataframes[selected_week]
 
     st.sidebar.header("Filtri")
@@ -123,7 +121,7 @@ if dataframes:
             selected_item = st.sidebar.selectbox(f"Seleziona {compare_by}", ["Tutti"] + items)
             if selected_item != "Tutti":
                 trend_data = []
-                for week, week_df in sorted(dataframes.items(), key=lambda x: int(re.search(r'Settimana (\d+)', x[0], re.IGNORECASE).group(1))):
+                for week, week_df in sorted(dataframes.items(), key=lambda x: int(re.search(r'Settimana\s*(\d+)', x[0], re.IGNORECASE).group(1))):
                     if week_df is not None and compare_by in week_df.columns:
                         item_df = week_df[week_df[compare_by] == selected_item]
                         if not item_df.empty:
