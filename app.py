@@ -18,7 +18,6 @@ def load_data(file_path):
         for col in numeric_cols:
             if col in df.columns:
                 df[col] = pd.to_numeric(df[col], errors="coerce")
-        # Standardizza nomi colonne
         df.columns = df.columns.str.strip()
         return df
     except Exception as e:
@@ -51,12 +50,12 @@ def aggregate_author_data(df, author):
         "Books": len(author_df)
     }
 
-# Carica file Excel
+# Carica file Excel in ordine alfabetico
 dataframes = {}
 if not os.path.exists(DATA_DIR):
     st.error(f"Cartella {DATA_DIR} non trovata.")
 else:
-    excel_files = glob.glob(os.path.join(DATA_DIR, "Classifica week*.xlsx"))
+    excel_files = sorted(glob.glob(os.path.join(DATA_DIR, "Classifica week*.xlsx")))
     for file_path in excel_files:
         try:
             week = os.path.basename(file_path).split("week")[1].split(".")[0].strip()
@@ -67,7 +66,7 @@ else:
             st.warning(f"Nome file non valido: {os.path.basename(file_path)}")
 
 if dataframes:
-    selected_week = st.sidebar.selectbox("Seleziona la settimana", list(dataframes.keys()))
+    selected_week = st.sidebar.selectbox("Seleziona la settimana", sorted(dataframes.keys()))
     df = dataframes[selected_week]
 
     st.sidebar.header("Filtri")
@@ -104,7 +103,7 @@ if dataframes:
             selected_item = st.sidebar.selectbox(f"Seleziona {compare_by}", ["Tutti"] + items)
             if selected_item != "Tutti":
                 trend_data = []
-                for week, week_df in dataframes.items():
+                for week, week_df in sorted(dataframes.items()):
                     if week_df is not None and compare_by in week_df.columns:
                         item_df = week_df[week_df[compare_by] == selected_item]
                         if not item_df.empty:
