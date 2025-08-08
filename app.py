@@ -46,8 +46,8 @@ def filter_data(df, filters):
                     filtered_df = filtered_df[filtered_df[col] == float(value)]
                 else:
                     filtered_df = filtered_df[filtered_df[col] == value]
-            except:
-                pass
+            except Exception as e:
+                st.warning(f"Errore nel filtraggio per {col}: {e}")
     return filtered_df
 
 def aggregate_author_data(df, author):
@@ -61,23 +61,32 @@ def aggregate_author_data(df, author):
         "Books": len(author_df)
     }
 
-# Carica file Excel in ordine alfabetico
+# Carica file Excel in ordine numerico
 dataframes = {}
 if not os.path.exists(DATA_DIR):
     st.error(f"Cartella {DATA_DIR} non trovata.")
 else:
-    excel_files = sorted(glob.glob(os.path.join(DATA_DIR, "Classifica week*.xlsx")), key=lambda x: int(re.search(r'week(\d+)', x).group(1)))
+    excel_files = glob.glob(os.path.join(DATA_DIR, "Classifica week*.xlsx"))
+    valid_files = []
+    for file_path in excel_files:
+        match = re.search(r'week(\d+)', os.path.basename(file_path), re.IGNORECASE)
+        if match:
+            valid_files.append((file_path, int(match.group(1))))
+        else:
+            st.warning(f"Nome file non valido (pattern 'week<numero>' non trovato): {os.path.basename(file_path)}")
+    # Ordina per numero settimana
+    excel_files = [f[0] for f in sorted(valid_files, key=lambda x: x[1])]
     for file_path in excel_files:
         try:
-            week_num = re.search(r'week(\d+)', os.path.basename(file_path)).group(1)
+            week_num = re.search(r'week(\d+)', os.path.basename(file_path), re.IGNORECASE).group(1)
             df = load_data(file_path)
             if df is not None:
                 dataframes[f"Settimana {week_num}"] = df
-        except:
-            st.warning(f"Nome file non valido: {os.path.basename(file_path)}")
+        except Exception as e:
+            st.warning(f"Errore nel processing del file: {os.path.basename(file_path)}: {e}")
 
 if dataframes:
-    selected_week = st.sidebar.selectbox("Seleziona la settimana", sorted(dataframes.keys(), key=lambda x: int(re.search(r'Settimana (\d+)', x).group(1))))
+    selected_week = st.sidebar.selectbox("Seleziona la settimana", sorted(dataframes.keys(), key=lambda x: int(re.search(r'Settimana (\d+)', x, re.IGNORECASE).group(1))))
     df = dataframes[selected_week]
 
     st.sidebar.header("Filtri")
@@ -114,7 +123,7 @@ if dataframes:
             selected_item = st.sidebar.selectbox(f"Seleziona {compare_by}", ["Tutti"] + items)
             if selected_item != "Tutti":
                 trend_data = []
-                for week, week_df in sorted(dataframes.items(), key=lambda x: int(re.search(r'Settimana (\d+)', x[0]).group(1))):
+                for week, week_df in sorted(dataframes.items(), key=lambda x: int(re.search(r'Settimana (\d+)', x[0], re.IGNORECASE).group(1))):
                     if week_df is not None and compare_by in week_df.columns:
                         item_df = week_df[week_df[compare_by] == selected_item]
                         if not item_df.empty:
