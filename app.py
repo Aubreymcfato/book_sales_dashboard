@@ -2,13 +2,9 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 
-# Configurazione della pagina
 st.set_page_config(page_title="Dashboard Vendite Libri", layout="wide")
-
-# Titolo della dashboard
 st.title("📚 Dashboard Interattiva Vendite Libri")
 
-# Funzione per caricare i dati da un file Excel
 @st.cache_data
 def load_data(file):
     try:
@@ -18,7 +14,6 @@ def load_data(file):
         st.error(f"Errore nel caricamento del file: {e}")
         return None
 
-# Funzione per filtrare i dati
 def filter_data(df, filters):
     filtered_df = df.copy()
     for col, value in filters.items():
@@ -29,15 +24,12 @@ def filter_data(df, filters):
                 filtered_df = filtered_df[filtered_df[col] == value]
     return filtered_df
 
-# Caricamento dei file nella sidebar
 st.sidebar.header("Caricamento File")
 uploaded_files = st.sidebar.file_uploader("Carica i file Excel", type=["xlsx"], accept_multiple_files=True)
 
-# Dizionario per memorizzare i dati di tutte le settimane
 dataframes = {}
 if uploaded_files:
     for file in uploaded_files:
-        # Estrai il numero della settimana dal nome del file (es. "Classifica week 30.xlsx" -> "Settimana 30")
         try:
             week = file.name.split("week")[1].split(".")[0].strip()
             df = load_data(file)
@@ -46,12 +38,10 @@ if uploaded_files:
         except IndexError:
             st.warning(f"Nome file non valido: {file.name}. Assicurati che contenga 'week' seguito dal numero.")
 
-# Selezione della settimana
 if dataframes:
     selected_week = st.sidebar.selectbox("Seleziona la settimana", list(dataframes.keys()))
     df = dataframes[selected_week]
 
-    # Filtri interattivi nella sidebar
     st.sidebar.header("Filtri")
     filters = {}
     for col in df.columns:
@@ -62,38 +52,29 @@ if dataframes:
             unique_values = sorted(df[col].dropna().unique())
             filters[col] = st.sidebar.selectbox(f"{col}", ["Tutti"] + unique_values, index=0)
 
-    # Applicazione dei filtri
     filtered_df = filter_data(df, filters)
-
-    # Visualizzazione della tabella
     st.header(f"Dati - {selected_week}")
     st.dataframe(filtered_df, use_container_width=True)
 
-    # Grafici
     st.header("Analisi Grafica")
-
-    # Grafico 1: Top 10 libri per unità vendute
     st.subheader("Top 10 Libri per Unità Vendute")
     top_10 = filtered_df.nlargest(10, "Units")[["Title", "Units"]]
     fig1 = px.bar(top_10, x="Title", y="Units", title="Top 10 Libri per Unità Vendute")
     fig1.update_layout(xaxis_title="Titolo", yaxis_title="Unità Vendute", xaxis_tickangle=45)
     st.plotly_chart(fig1, use_container_width=True)
 
-    # Grafico 2: Distribuzione per genere
     st.subheader("Distribuzione per Genere")
     genre_counts = filtered_df["Genre"].value_counts().reset_index()
     genre_counts.columns = ["Genre", "Count"]
     fig2 = px.pie(genre_counts, names="Genre", values="Count", title="Distribuzione dei Libri per Genere")
     st.plotly_chart(fig2, use_container_width=True)
 
-    # Grafico 3: Prezzo medio per editore
     st.subheader("Prezzo Medio per Editore")
     avg_price = filtered_df.groupby("Publisher")["Cover price"].mean().reset_index()
     fig3 = px.bar(avg_price, x="Publisher", y="Cover price", title="Prezzo Medio per Editore")
     fig3.update_layout(xaxis_title="Editore", yaxis_title="Prezzo Medio (€)", xaxis_tickangle=45)
     st.plotly_chart(fig3, use_container_width=True)
 
-    # Statistiche riassuntive
     st.header("Statistiche Riassuntive")
     col1, col2, col3 = st.columns(3)
     with col1:
@@ -102,11 +83,9 @@ if dataframes:
         st.metric("Prezzo Medio", f"€{filtered_df['Cover price'].mean():.2f}")
     with col3:
         st.metric("Numero di Libri", len(filtered_df))
-
 else:
     st.info("Carica uno o più file Excel per visualizzare i dati.")
 
-# Istruzioni per l'utente
 st.sidebar.markdown("""
 ### Istruzioni
 1. Carica uno o più file Excel usando il pulsante sopra.
