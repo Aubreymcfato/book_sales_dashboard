@@ -18,6 +18,8 @@ def load_data(file_path):
         for col in numeric_cols:
             if col in df.columns:
                 df[col] = pd.to_numeric(df[col], errors="coerce")
+        # Standardizza nomi colonne
+        df.columns = df.columns.str.strip()
         return df
     except Exception as e:
         st.error(f"Errore nel caricamento di {os.path.basename(file_path)}: {e}")
@@ -45,11 +47,11 @@ def aggregate_author_data(df, author):
     if author_df.empty:
         return None
     return {
-        "Total Units": author_df["Units"].sum(),  # Commentato per riferimento: somma delle unità vendute
+        "Total Units": author_df["Units"].sum(),  # Commentato: somma unità vendute
         "Books": len(author_df)
     }
 
-# Carica file Excel da data/
+# Carica file Excel
 dataframes = {}
 if not os.path.exists(DATA_DIR):
     st.error(f"Cartella {DATA_DIR} non trovata.")
@@ -70,11 +72,12 @@ if dataframes:
 
     st.sidebar.header("Filtri")
     filters = {}
-    for col in ["Rank", "Publisher", "Author", "Title"]:  # Filtri semplificati
-        unique_values = sorted(df[col].dropna().unique())
-        filters[col] = st.sidebar.selectbox(f"{col}", ["Tutti"] + [str(val) for val in unique_values], index=0)
-        # Commentate le colonne non usate nei filtri:
-        # "Author nationality", "ISBN / EAN", "Cover price", "Pages", "Format",
+    filter_cols = ["Rank", "Publisher", "Author", "Title"]
+    for col in filter_cols:
+        if col in df.columns:
+            unique_values = sorted(df[col].dropna().unique())
+            filters[col] = st.sidebar.selectbox(f"{col}", ["Tutti"] + [str(val) for val in unique_values], index=0)
+        # Commentate: "Author nationality", "ISBN / EAN", "Cover price", "Pages", "Format",
         # "Genre level 1", "Genre level 2", "Genre", "Release date",
         # "Units", "Units since release", "Value", "Value since release"
 
@@ -83,7 +86,7 @@ if dataframes:
         st.header(f"Dati - {selected_week}")
         st.dataframe(filtered_df, use_container_width=True)
 
-        # Statistiche per autore
+        # Statistiche autore
         selected_author = filters.get("Author", "Tutti")
         if selected_author != "Tutti":
             st.header(f"Statistiche per {selected_author}")
@@ -93,27 +96,27 @@ if dataframes:
                 col1.metric("Unità Vendute", author_stats["Total Units"])
                 col2.metric("Numero di Libri", author_stats["Books"])
 
-        # Confronto tra settimane
+        # Confronto settimane
         st.header("Confronto tra Settimane")
-        compare_by = st.sidebar.selectbox("Confronta per", ["Titolo", "Autore"])
-        items = sorted(df[compare_by].dropna().unique())
-        selected_item = st.sidebar.selectbox(f"Seleziona {compare_by}", ["Tutti"] + items)
-        
-        if selected_item != "Tutti":
-            trend_data = []
-            for week, week_df in dataframes.items():
-                if week_df is not None:
-                    item_df = week_df[week_df[compare_by] == selected_item]
-                    if not item_df.empty:
-                        trend_data.append({"Settimana": week, "Unità Vendute": item_df["Units"].sum()})
-            if trend_data:
-                trend_df = pd.DataFrame(trend_data)
-                st.subheader(f"Andamento di {selected_item}")
-                fig = px.line(trend_df, x="Settimana", y="Unità Vendute")
-                st.plotly_chart(fig, use_container_width=True)
-                st.dataframe(trend_df)
-            else:
-                st.info(f"Nessun dato per {selected_item}.")
+        compare_by = st.sidebar.selectbox("Confronta per", ["Title", "Author"])
+        if compare_by in df.columns:
+            items = sorted(df[compare_by].dropna().unique())
+            selected_item = st.sidebar.selectbox(f"Seleziona {compare_by}", ["Tutti"] + items)
+            if selected_item != "Tutti":
+                trend_data = []
+                for week, week_df in dataframes.items():
+                    if week_df is not None and compare_by in week_df.columns:
+                        item_df = week_df[week_df[compare_by] == selected_item]
+                        if not item_df.empty:
+                            trend_data.append({"Settimana": week, "Unità Vendute": item_df["Units"].sum()})
+                if trend_data:
+                    trend_df = pd.DataFrame(trend_data)
+                    st.subheader(f"Andamento di {selected_item}")
+                    fig = px.line(trend_df, x="Settimana", y="Unità Vendute")
+                    st.plotly_chart(fig, use_container_width=True)
+                    st.dataframe(trend_df)
+                else:
+                    st.info(f"Nessun dato per {selected_item}.")
 
         st.header("Analisi Grafica")
         try:
