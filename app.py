@@ -13,28 +13,27 @@ DATA_DIR = "data"
 @st.cache_data
 def load_data(file_path):
     try:
-        # Prova diverse righe di intestazione
-        for skip in range(10, 21):
-            try:
-                df = pd.read_excel(file_path, sheet_name="Export", skiprows=skip, engine="openpyxl")
-                # Converte i nomi delle colonne in stringhe
-                df.columns = [str(col).strip().lower().replace(" ", "_") for col in df.columns]
-                # Cerca colonna 'Rank' (case-insensitive)
-                rank_col = next((col for col in df.columns if col in ["rank", "rango", "classifica"]), None)
-                if rank_col:
-                    df = df.rename(columns={rank_col: "rank"})
-                    # Filtra righe con 'Rank' numerico
-                    df = df[df["rank"].apply(lambda x: pd.notna(x) and isinstance(x, (int, float)))]
-                    if not df.empty:
-                        numeric_cols = ["rank", "units"]  # Commentate: "cover_price", "pages", "units_since_release", "value", "value_since_release"
-                        for col in numeric_cols:
-                            if col in df.columns:
-                                df[col] = pd.to_numeric(df[col], errors="coerce")
-                        return df
-            except:
-                continue
-        st.error(f"File {os.path.basename(file_path)} manca colonna 'Rank' o varianti. Colonne trovate: {list(df.columns)}")
-        return None
+        # Usa la prima riga come intestazione
+        df = pd.read_excel(file_path, sheet_name="Export", header=0, engine="openpyxl")
+        # Converte i nomi delle colonne in stringhe e standardizza
+        df.columns = [str(col).strip().lower().replace(" ", "_") for col in df.columns]
+        # Cerca colonna 'Rank' (case-insensitive)
+        rank_variants = ["rank", "rango", "classifica"]
+        rank_col = next((col for col in df.columns if col in rank_variants), None)
+        if not rank_col:
+            st.error(f"File {os.path.basename(file_path)} manca colonna 'Rank' o varianti. Colonne trovate: {list(df.columns)}")
+            return None
+        df = df.rename(columns={rank_col: "rank"})
+        # Filtra righe con 'Rank' numerico
+        df = df[df["rank"].apply(lambda x: pd.notna(x) and isinstance(x, (int, float)))]
+        if df.empty:
+            st.error(f"File {os.path.basename(file_path)} non contiene righe valide per 'Rank'.")
+            return None
+        numeric_cols = ["rank", "units"]  # Commentate: "cover_price", "pages", "units_since_release", "value", "value_since_release"
+        for col in numeric_cols:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors="coerce")
+        return df
     except Exception as e:
         st.error(f"Errore nel caricamento di {os.path.basename(file_path)}: {e}")
         return None
