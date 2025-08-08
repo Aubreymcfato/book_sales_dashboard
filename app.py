@@ -14,11 +14,11 @@ def load_data(file_path):
     try:
         df = pd.read_excel(file_path, sheet_name="Export", skiprows=16, engine="openpyxl")
         df = df[df["Rank"].apply(lambda x: isinstance(x, (int, float)) and not pd.isna(x))]
-        numeric_cols = ["Rank"] #, "Cover price", "Pages", "Units", "Units since release", "Value", "Value since release"]
+        df.columns = df.columns.str.strip()
+        numeric_cols = ["Rank", "Units", "Units since release"]  # "Cover price", "Pages", "Value", "Value since release" opzionali
         for col in numeric_cols:
             if col in df.columns:
                 df[col] = pd.to_numeric(df[col], errors="coerce")
-        df.columns = df.columns.str.strip()
         return df
     except Exception as e:
         st.error(f"Errore nel caricamento di {os.path.basename(file_path)}: {e}")
@@ -31,7 +31,7 @@ def filter_data(df, filters):
     for col, value in filters.items():
         if value and value != "Tutti":
             try:
-                if col == "Rank": #, "Cover price", "Pages", "Units", "Units since release"]:
+                if col == "Rank":
                     filtered_df = filtered_df[filtered_df[col] == float(value)]
                 else:
                     filtered_df = filtered_df[filtered_df[col] == value]
@@ -46,7 +46,7 @@ def aggregate_author_data(df, author):
     if author_df.empty:
         return None
     return {
-        "Total Units": author_df["Units"].sum(),  # Commentato: somma unità vendute
+        "Total Units": author_df["Units"].sum(),
         "Books": len(author_df)
     }
 
