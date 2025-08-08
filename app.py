@@ -64,6 +64,18 @@ def aggregate_author_data(df, author):
         "Books": len(author_df)
     }
 
+def aggregate_all_weeks(dataframes):
+    all_dfs = []
+    for week, df in dataframes.items():
+        if df is not None:
+            all_dfs.append(df)
+    if not all_dfs:
+        return None
+    # Concatena tutti i DataFrame e somma 'units' per combinazioni uniche
+    combined_df = pd.concat(all_dfs, ignore_index=True)
+    agg_df = combined_df.groupby(["rank", "publisher", "author", "title"], as_index=False)["units"].sum()
+    return agg_df
+
 # Carica file Excel in ordine numerico
 dataframes = {}
 if not os.path.exists(DATA_DIR):
@@ -87,8 +99,16 @@ else:
             st.warning(f"Errore nel processing del file: {os.path.basename(file_path)}: {e}")
 
 if dataframes:
-    selected_week = st.sidebar.selectbox("Seleziona la settimana", sorted(dataframes.keys(), key=lambda x: int(re.search(r'Settimana\s*(\d+)', x, re.IGNORECASE).group(1))))
-    df = dataframes[selected_week]
+    week_options = ["Tutti"] + sorted(dataframes.keys(), key=lambda x: int(re.search(r'Settimana\s*(\d+)', x, re.IGNORECASE).group(1)))
+    selected_week = st.sidebar.selectbox("Seleziona la settimana", week_options)
+    
+    # Seleziona DataFrame in base alla settimana
+    if selected_week == "Tutti":
+        df = aggregate_all_weeks(dataframes)
+        if df is None:
+            st.error("Nessun dato disponibile per l'aggregazione di tutte le settimane.")
+    else:
+        df = dataframes[selected_week]
 
     st.sidebar.header("Filtri")
     filters = {}
@@ -110,7 +130,7 @@ if dataframes:
         selected_author = filters.get("author", "Tutti")
         if selected_author != "Tutti":
             st.header(f"Statistiche per {selected_author}")
-            author_stats = aggregate_author_data(df, selected_author)
+            author_stats = aggregate_author_data(filtered_df, selected_author)
             if author_stats:
                 col1, col2 = st.columns(2)
                 col1.metric("Unità Vendute", author_stats["Total Units"])
@@ -138,6 +158,7 @@ if dataframes:
                 else:
                     st.info(f"Nessun dato per {selected_item}.")
 
+        # Grafico Top 10 Libri basato sui dati filtrati
         st.header("Analisi Grafica")
         try:
             st.subheader("Top 10 Libri")
