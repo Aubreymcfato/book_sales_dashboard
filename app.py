@@ -137,7 +137,7 @@ if dataframes:
                 col2.metric("Numero di Libri", author_stats["Books"])
 
         # Confronto settimane
-        st.header("Confronto tra Settimane")
+        st.header("Confronto tra settimane")
         compare_by = st.sidebar.selectbox("Confronta per", ["title", "author"])
         if compare_by in df.columns:
             items = sorted(df[compare_by].dropna().unique())
@@ -161,8 +161,8 @@ if dataframes:
         # Grafico Top 10 Libri basato sui dati filtrati
         st.header("Analisi Grafica")
         try:
-            st.subheader("Top 10 Libri")
-            top_10 = filtered_df.nlargest(10, "units")[["title", "units"]]
+            st.subheader("Top 20 Libri")
+            top_10 = filtered_df.nlargest(20, "units")[["title", "units"]]
             fig1 = px.bar(top_10, x="title", y="units")
             fig1.update_layout(xaxis_title="Titolo", yaxis_title="Unità Vendute", xaxis_tickangle=45)
             st.plotly_chart(fig1, use_container_width=True)
