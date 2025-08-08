@@ -66,7 +66,7 @@ dataframes = {}
 if not os.path.exists(DATA_DIR):
     st.error(f"Cartella {DATA_DIR} non trovata.")
 else:
-    excel_files = glob.glob(os.path.join(DATA_DIR, "Classifica week*.xlsx"))
+    excel_files = glob.glob(os.path.join(DATA_DIR, "Classifica week *.xlsx"))
     valid_files = []
     for file_path in excel_files:
         match = re.search(r'week(\d+)', os.path.basename(file_path), re.IGNORECASE)
