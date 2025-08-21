@@ -38,13 +38,15 @@ def load_data(file_path):
         st.error(f"Errore nel caricamento di {os.path.basename(file_path)}: {e}")
         return None
 
-def filter_data(df, filters):
+def filter_data(df, filters, is_aggregate=False):
     if df is None:
         return None
     filtered_df = df.copy()
     for col, value in filters.items():
         if value and value != "Tutti":
             try:
+                if col == "rank" and is_aggregate:
+                    continue  # Ignora filtro rank per aggregati di tutte le settimane
                 if col == "rank":
                     filtered_df = filtered_df[filtered_df[col] == float(value)]
                 else:
@@ -53,15 +55,15 @@ def filter_data(df, filters):
                 st.warning(f"Errore nel filtraggio per {col}: {e}")
     return filtered_df
 
-def aggregate_author_data(df, author):
-    if df is None or author == "Tutti":
+def aggregate_group_data(df, group_by, value):
+    if df is None or value == "Tutti":
         return None
-    author_df = df[df["author"] == author]
-    if author_df.empty:
+    group_df = df[df[group_by] == value]
+    if group_df.empty:
         return None
     return {
-        "Total Units": author_df["units"].sum(),
-        "Books": len(author_df)
+        "Total Units": group_df["units"].sum(),
+        "Items": len(group_df["title"].unique()) if group_by != "title" else 1
     }
 
 def aggregate_all_weeks(dataframes):
@@ -71,9 +73,9 @@ def aggregate_all_weeks(dataframes):
             all_dfs.append(df)
     if not all_dfs:
         return None
-    # Concatena tutti i DataFrame e somma 'units' per combinazioni uniche
+    # Concatena tutti i DataFrame e somma 'units' per combinazioni uniche (senza rank)
     combined_df = pd.concat(all_dfs, ignore_index=True)
-    agg_df = combined_df.groupby(["rank", "publisher", "author", "title"], as_index=False)["units"].sum()
+    agg_df = combined_df.groupby(["publisher", "author", "title"], as_index=False)["units"].sum()
     return agg_df
 
 # Carica file Excel in ordine numerico
@@ -103,7 +105,8 @@ if dataframes:
     selected_week = st.sidebar.selectbox("Seleziona la settimana", week_options)
     
     # Seleziona DataFrame in base alla settimana
-    if selected_week == "Tutti":
+    is_aggregate = selected_week == "Tutti"
+    if is_aggregate:
         df = aggregate_all_weeks(dataframes)
         if df is None:
             st.error("Nessun dato disponibile per l'aggregazione di tutte le settimane.")
@@ -116,57 +119,79 @@ if dataframes:
     for col in filter_cols:
         if col in df.columns:
             unique_values = sorted(df[col].dropna().unique())
-            filters[col] = st.sidebar.selectbox(f"{col}", ["Tutti"] + [str(val) for val in unique_values], index=0)
-        # Commentate: "author_nationality", "isbn_ean", "cover_price", "pages", "format",
-        # "genre_level_1", "genre_level_2", "genre", "release_date",
-        # "units", "units_since_release", "value", "value_since_release"
+            filters[col] = st.sidebar.selectbox(f"{col.capitalize()}", ["Tutti"] + [str(val) for val in unique_values], index=0)
 
-    filtered_df = filter_data(df, filters)
+    filtered_df = filter_data(df, filters, is_aggregate=is_aggregate)
     if filtered_df is not None and not filtered_df.empty:
         st.header(f"Dati - {selected_week}")
         st.dataframe(filtered_df, use_container_width=True)
 
-        # Statistiche autore
+        # Statistiche per autore e editore selezionati
         selected_author = filters.get("author", "Tutti")
         if selected_author != "Tutti":
-            st.header(f"Statistiche per {selected_author}")
-            author_stats = aggregate_author_data(filtered_df, selected_author)
+            st.header(f"Statistiche per Autore: {selected_author}")
+            author_stats = aggregate_group_data(filtered_df, "author", selected_author)
             if author_stats:
                 col1, col2 = st.columns(2)
                 col1.metric("Unità Vendute", author_stats["Total Units"])
-                col2.metric("Numero di Libri", author_stats["Books"])
+                col2.metric("Numero di Libri", author_stats["Items"])
 
-        # Confronto settimane
+        selected_publisher = filters.get("publisher", "Tutti")
+        if selected_publisher != "Tutti":
+            st.header(f"Statistiche per Editore: {selected_publisher}")
+            publisher_stats = aggregate_group_data(filtered_df, "publisher", selected_publisher)
+            if publisher_stats:
+                col1, col2 = st.columns(2)
+                col1.metric("Unità Vendute", publisher_stats["Total Units"])
+                col2.metric("Numero di Autori/Libri", publisher_stats["Items"])
+
+        # Confronto tra settimane (migliorato con multi-select)
         st.header("Confronto tra settimane")
-        compare_by = st.sidebar.selectbox("Confronta per", ["title", "author"])
+        compare_by = st.sidebar.selectbox("Confronta per", ["title", "author", "publisher"])
         if compare_by in df.columns:
             items = sorted(df[compare_by].dropna().unique())
-            selected_item = st.sidebar.selectbox(f"Seleziona {compare_by}", ["Tutti"] + items)
-            if selected_item != "Tutti":
+            selected_items = st.sidebar.multiselect(f"Seleziona {compare_by}(i)", items)
+            if selected_items:
                 trend_data = []
                 for week, week_df in sorted(dataframes.items(), key=lambda x: int(re.search(r'Settimana\s*(\d+)', x[0], re.IGNORECASE).group(1))):
                     if week_df is not None and compare_by in week_df.columns:
-                        item_df = week_df[week_df[compare_by] == selected_item]
-                        if not item_df.empty:
-                            trend_data.append({"Settimana": week, "Unità Vendute": item_df["units"].sum()})
+                        for item in selected_items:
+                            item_df = week_df[week_df[compare_by] == item]
+                            if not item_df.empty:
+                                trend_data.append({"Settimana": week, "Unità Vendute": item_df["units"].sum(), "Item": item})
                 if trend_data:
                     trend_df = pd.DataFrame(trend_data)
-                    st.subheader(f"Andamento di {selected_item}")
-                    fig = px.line(trend_df, x="Settimana", y="Unità Vendute")
+                    st.subheader(f"Andamento per {compare_by.capitalize()}")
+                    fig = px.line(trend_df, x="Settimana", y="Unità Vendute", color="Item", markers=True)
                     st.plotly_chart(fig, use_container_width=True)
                     st.dataframe(trend_df)
                 else:
-                    st.info(f"Nessun dato per {selected_item}.")
+                    st.info(f"Nessun dato per i selezionati {compare_by}.")
 
-        # Grafico Top 10 Libri basato sui dati filtrati
+        # Analisi Grafica migliorata
         st.header("Analisi Grafica")
         try:
+            # Top 20 Libri
             st.subheader("Top 20 Libri")
-            top_10 = filtered_df.nlargest(20, "units")[["title", "units"]]
-            fig1 = px.bar(top_10, x="title", y="units")
+            top_books = filtered_df.nlargest(20, "units")[["title", "units"]]
+            fig1 = px.bar(top_books, x="title", y="units")
             fig1.update_layout(xaxis_title="Titolo", yaxis_title="Unità Vendute", xaxis_tickangle=45)
             st.plotly_chart(fig1, use_container_width=True)
-        except:
-            st.error("Errore nei grafici.")
+
+            # Top 10 Autori
+            st.subheader("Top 10 Autori")
+            top_authors = filtered_df.groupby("author")["units"].sum().nlargest(10).reset_index()
+            fig2 = px.bar(top_authors, x="author", y="units")
+            fig2.update_layout(xaxis_title="Autore", yaxis_title="Unità Vendute", xaxis_tickangle=45)
+            st.plotly_chart(fig2, use_container_width=True)
+
+            # Top 10 Editori
+            st.subheader("Top 10 Editori")
+            top_publishers = filtered_df.groupby("publisher")["units"].sum().nlargest(10).reset_index()
+            fig3 = px.bar(top_publishers, x="publisher", y="units")
+            fig3.update_layout(xaxis_title="Editore", yaxis_title="Unità Vendute", xaxis_tickangle=45)
+            st.plotly_chart(fig3, use_container_width=True)
+        except Exception as e:
+            st.error(f"Errore nei grafici: {e}")
 else:
     st.info("Nessun file Excel valido in data/.")
