@@ -27,15 +27,15 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # Sezione: Definizione della cartella dati
-# Mantengo l'idea di una cartella 'data' con file CSV (cambiato da .xlsx a .csv come richiesto)
+# Mantengo l'idea di una cartella 'data' con file XLSX (corretto da CSV a XLSX come richiesto)
 DATA_DIR = "data"
 
-# Sezione: Funzione per caricare i dati da un file CSV
-# Questa funzione legge un singolo file CSV, standardizza le colonne, filtra righe valide e converte tipi numerici
+# Sezione: Funzione per caricare i dati da un file XLSX
+# Questa funzione legge un singolo file XLSX, standardizza le colonne, filtra righe valide e converte tipi numerici
 @st.cache_data
 def load_data(file_path):
     try:
-        df = pd.read_csv(file_path)  # Cambiato da read_excel a read_csv
+        df = pd.read_excel(file_path, sheet_name="Export", header=0, engine="openpyxl")  # Corretto per leggere XLSX
         df.columns = [str(col).strip().lower().replace(" ", "_") for col in df.columns]
         rank_variants = ["rank", "rango", "classifica"]
         rank_col = next((col for col in df.columns if col in rank_variants), None)
@@ -101,15 +101,15 @@ def aggregate_all_weeks(dataframes):
     agg_df = combined_df.groupby(["publisher", "author", "title"], as_index=False)["units"].sum()
     return agg_df
 
-# Sezione: Caricamento dei file CSV dalla cartella 'data'
-# Cerca file con pattern 'Classifica week*.csv', ordina per numero settimana
+# Sezione: Caricamento dei file XLSX dalla cartella 'data'
+# Cerca file con pattern 'Classifica week*.xlsx', ordina per numero settimana
 dataframes = {}
 if not os.path.exists(DATA_DIR):
     st.error(f"Cartella {DATA_DIR} non trovata.")
 else:
-    csv_files = glob.glob(os.path.join(DATA_DIR, "Classifica week*.csv"))  # Cambiato da .xlsx a .csv
+    xlsx_files = glob.glob(os.path.join(DATA_DIR, "Classifica week*.xlsx"))  # Corretto per XLSX
     valid_files = []
-    for file_path in csv_files:
+    for file_path in xlsx_files:
         match = re.search(r'week\s*(\d+)', os.path.basename(file_path), re.IGNORECASE)
         if match:
             valid_files.append((file_path, int(match.group(1))))
@@ -235,4 +235,4 @@ if dataframes:
                 else:
                     st.info(f"Nessun dato per i selezionati.")
 else:
-    st.info("Nessun file CSV valido in data/.")
+    st.info("Nessun file XLSX valido in data/.")
