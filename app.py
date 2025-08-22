@@ -27,7 +27,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # Sezione: Definizione della cartella dati
-# Mantengo l'idea di una cartella 'data' con file XLSX (corretto da CSV a XLSX come richiesto)
+# Mantengo l'idea di una cartella 'data' con file XLSX
 DATA_DIR = "data"
 
 # Sezione: Funzione per caricare i dati da un file XLSX
@@ -35,7 +35,7 @@ DATA_DIR = "data"
 @st.cache_data
 def load_data(file_path):
     try:
-        df = pd.read_excel(file_path, sheet_name="Export", header=0, engine="openpyxl")  # Corretto per leggere XLSX
+        df = pd.read_excel(file_path, sheet_name="Export", header=0, engine="openpyxl")  # Legge XLSX
         df.columns = [str(col).strip().lower().replace(" ", "_") for col in df.columns]
         rank_variants = ["rank", "rango", "classifica"]
         rank_col = next((col for col in df.columns if col in rank_variants), None)
@@ -107,7 +107,7 @@ dataframes = {}
 if not os.path.exists(DATA_DIR):
     st.error(f"Cartella {DATA_DIR} non trovata.")
 else:
-    xlsx_files = glob.glob(os.path.join(DATA_DIR, "Classifica week*.xlsx"))  # Corretto per XLSX
+    xlsx_files = glob.glob(os.path.join(DATA_DIR, "Classifica week*.xlsx"))
     valid_files = []
     for file_path in xlsx_files:
         match = re.search(r'week\s*(\d+)', os.path.basename(file_path), re.IGNORECASE)
@@ -215,17 +215,19 @@ if dataframes:
             if selected_items:
                 trend_data = []
                 for week, week_df in sorted(dataframes.items(), key=lambda x: int(re.search(r'Settimana\s*(\d+)', x[0], re.IGNORECASE).group(1))):
+                    week_num = int(re.search(r'Settimana\s*(\d+)', week, re.IGNORECASE).group(1))  # Estrae il numero della settimana per ordinamento
                     if week_df is not None and compare_by in week_df.columns:
                         for item in selected_items:
                             item_df = week_df[week_df[compare_by] == item]
                             if not item_df.empty:
-                                trend_data.append({"Settimana": week, "Unità Vendute": item_df["units"].sum(), "Item": item})
+                                trend_data.append({"Settimana": week, "Unità Vendute": item_df["units"].sum(), "Item": item, "Week_Num": week_num})
                 if trend_data:
                     trend_df = pd.DataFrame(trend_data)
+                    trend_df.sort_values('Week_Num', inplace=True)  # Ordina il DataFrame per Week_Num
                     st.subheader(f"Andamento per { {'title': 'Titolo', 'author': 'Autore', 'publisher': 'Editore'}[compare_by] }")
                     # Grafico linea con Altair per confronti (più bello, con colori, tooltips e interattività)
                     chart = alt.Chart(trend_df).mark_line(point=True).encode(
-                        x=alt.X('Settimana:N', title='Settimana'),
+                        x=alt.X('Settimana:N', sort=alt.EncodingSortField(field='Week_Num', order='ascending'), title='Settimana'),
                         y=alt.Y('Unità Vendute:Q', title='Unità Vendute'),
                         color=alt.Color('Item:N', legend=alt.Legend(title="Item")),
                         tooltip=['Settimana', 'Unità Vendute', 'Item']
