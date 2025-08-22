@@ -122,8 +122,8 @@ else:
 
 # Sezione: Logica principale della dashboard
 if dataframes:
-    # Crea schede (tabs) come richiesto: una principale con filtri, una per comparazioni
-    tab1, tab2 = st.tabs(["Principale", "Comparazioni"])
+    # Crea schede (tabs) come richiesto: una principale con filtri, una per comparazioni, una per analisi Adelphi
+    tab1, tab2, tab3 = st.tabs(["Principale", "Comparazioni", "Analisi Adelphi"])
 
     # Sezione: Scheda Principale - Gestisce selezione settimana, filtri in italiano, dati e statistiche
     with tab1:
@@ -236,5 +236,49 @@ if dataframes:
                     st.dataframe(trend_df)
                 else:
                     st.info(f"Nessun dato per i selezionati.")
+
+    # Sezione: Scheda Analisi Adelphi - Analisi specifica per l'editore 'Adelphi', con heatmap delle variazioni settimanali
+    with tab3:
+        st.header("Analisi Variazioni Settimanali per Adelphi")
+        
+        # Raccolgo i dati solo per publisher == 'Adelphi'
+        adelphi_data = []
+        for week, week_df in sorted(dataframes.items(), key=lambda x: int(re.search(r'Settimana\s*(\d+)', x[0], re.IGNORECASE).group(1))):
+            week_num = int(re.search(r'Settimana\s*(\d+)', week, re.IGNORECASE).group(1))
+            if week_df is not None:
+                adelphi_df = week_df[week_df['publisher'].str.contains('Adelphi', case=False, na=False)]  # Filtra per 'Adelphi' (case-insensitive)
+                if not adelphi_df.empty:
+                    adelphi_df = adelphi_df[['title', 'units']].copy()
+                    adelphi_df['Settimana'] = week
+                    adelphi_df['Week_Num'] = week_num
+                    adelphi_data.append(adelphi_df)
+        
+        if adelphi_data:
+            adelphi_df = pd.concat(adelphi_data, ignore_index=True)
+            adelphi_df.sort_values(['title', 'Week_Num'], inplace=True)
+            
+            # Calcola le differenze rispetto alla settimana precedente per ogni titolo
+            adelphi_df['Previous_Units'] = adelphi_df.groupby('title')['units'].shift(1)
+            adelphi_df['Diff'] = adelphi_df['units'] - adelphi_df['Previous_Units']
+            adelphi_df['Diff'] = adelphi_df['Diff'].fillna(0)  # Per la prima settimana, diff = 0
+            
+            # Pivot per heatmap: righe = title, colonne = Settimana, valori = Diff (per colori), ma mostra units nel tooltip
+            pivot_df = adelphi_df.pivot(index='title', columns='Settimana', values=['Diff', 'units'])
+            pivot_df = pivot_df.stack(level=0).reset_index()  # Per formato long per Altair
+            
+            # Heatmap con Altair: colori basati su Diff (rosso per negativo, verde per positivo)
+            st.subheader("Heatmap Variazioni (Diff) - Verde: Crescita, Rosso: Calo")
+            heatmap = alt.Chart(pivot_df).mark_rect().encode(
+                x=alt.X('Settimana:O', sort=alt.EncodingSortField(field='Week_Num', order='ascending')),
+                y='title:O',
+                color=alt.Color('Diff:Q', scale=alt.Scale(scheme='redyellowgreen', domainMid=0), title='Variazione'),
+                tooltip=['title', 'Settimana', 'units', 'Diff']
+            ).properties(width='container').interactive()
+            st.altair_chart(heatmap, use_container_width=True)
+            
+            # Mostra anche il dataframe raw per riferimento
+            st.dataframe(adelphi_df[['title', 'Settimana', 'units', 'Diff']])
+        else:
+            st.info("Nessun dato disponibile per l'editore 'Adelphi'.")
 else:
     st.info("Nessun file XLSX valido in data/.")
