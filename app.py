@@ -174,37 +174,46 @@ if dataframes:
                 # Sezione: Analisi Grafica nella scheda principale (usando Altair per grafiche più belle)
                 st.header("Analisi Grafica")
                 try:
-                    # Top 20 Libri - Grafico a barre con Altair (più estetico, con tooltips e tema)
+                    # Top 20 Libri - Gestisci singolo valore con metric invece di chart
                     st.subheader("Top 20 Libri")
                     top_books = filtered_df.nlargest(20, "units")[["title", "units"]]
-                    chart1 = alt.Chart(top_books).mark_bar(color='#4c78a8').encode(
-                        x=alt.X('title:N', sort='-y', title='Titolo'),
-                        y=alt.Y('units:Q', title='Unità Vendute'),
-                        tooltip=['title', 'units']
-                    ).properties(width='container').interactive()
-                    st.altair_chart(chart1, use_container_width=True)
+                    if len(top_books) == 1:
+                        st.metric(label=top_books['title'].iloc[0], value=top_books['units'].iloc[0])
+                    else:
+                        chart1 = alt.Chart(top_books).mark_bar(color='#4c78a8').encode(
+                            x=alt.X('title:N', sort='-y', title='Titolo'),
+                            y=alt.Y('units:Q', title='Unità Vendute'),
+                            tooltip=['title', 'units']
+                        ).properties(width='container').interactive()
+                        st.altair_chart(chart1, use_container_width=True)
 
-                    # Top 10 Autori
+                    # Top 10 Autori - Gestisci singolo valore con metric
                     st.subheader("Top 10 Autori")
                     author_units = filtered_df.groupby("author")["units"].sum()
                     author_units = author_units[author_units.index != 'AA.VV']  # Escludi "AA.VV"
                     top_authors = author_units.nlargest(10).reset_index()
-                    chart2 = alt.Chart(top_authors).mark_bar(color='#54a24b').encode(
-                        x=alt.X('author:N', sort='-y', title='Autore'),
-                        y=alt.Y('units:Q', title='Unità Vendute'),
-                        tooltip=['author', 'units']
-                    ).properties(width='container').interactive()
-                    st.altair_chart(chart2, use_container_width=True)
+                    if len(top_authors) == 1:
+                        st.metric(label=top_authors['author'].iloc[0], value=top_authors['units'].iloc[0])
+                    else:
+                        chart2 = alt.Chart(top_authors).mark_bar(color='#54a24b').encode(
+                            x=alt.X('author:N', sort='-y', title='Autore'),
+                            y=alt.Y('units:Q', title='Unità Vendute'),
+                            tooltip=['author', 'units']
+                        ).properties(width='container').interactive()
+                        st.altair_chart(chart2, use_container_width=True)
 
-                    # Top 10 Editori
+                    # Top 10 Editori - Gestisci singolo valore con metric
                     st.subheader("Top 10 Editori")
                     top_publishers = filtered_df.groupby("publisher")["units"].sum().nlargest(10).reset_index()
-                    chart3 = alt.Chart(top_publishers).mark_bar(color='#e45756').encode(
-                        x=alt.X('publisher:N', sort='-y', title='Editore'),
-                        y=alt.Y('units:Q', title='Unità Vendute'),
-                        tooltip=['publisher', 'units']
-                    ).properties(width='container').interactive()
-                    st.altair_chart(chart3, use_container_width=True)
+                    if len(top_publishers) == 1:
+                        st.metric(label=top_publishers['publisher'].iloc[0], value=top_publishers['units'].iloc[0])
+                    else:
+                        chart3 = alt.Chart(top_publishers).mark_bar(color='#e45756').encode(
+                            x=alt.X('publisher:N', sort='-y', title='Editore'),
+                            y=alt.Y('units:Q', title='Unità Vendute'),
+                            tooltip=['publisher', 'units']
+                        ).properties(width='container').interactive()
+                        st.altair_chart(chart3, use_container_width=True)
                 except Exception as e:
                     st.error(f"Errore nei grafici: {e}")
 
@@ -294,7 +303,7 @@ if dataframes:
             if week_df is not None:
                 adelphi_df = week_df[week_df['publisher'].str.contains('Adelphi', case=False, na=False)]  # Filtra per 'Adelphi' (case-insensitive)
                 if not adelphi_df.empty:
-                    adelphi_df = adelphi_df[['title', 'units']].copy()
+                    adelphi_df = adelphi_df[['title', 'author', 'units']].copy()  # Aggiunto 'author' per filtraggio
                     adelphi_df['Settimana'] = week
                     adelphi_df['Week_Num'] = week_num
                     adelphi_data.append(adelphi_df)
@@ -302,7 +311,12 @@ if dataframes:
         if adelphi_data:
             adelphi_df = pd.concat(adelphi_data, ignore_index=True)
             # Aggrega per titolo e settimana per gestire duplicati
-            adelphi_df = adelphi_df.groupby(['title', 'Settimana', 'Week_Num'])['units'].sum().reset_index()
+            adelphi_df = adelphi_df.groupby(['title', 'author', 'Settimana', 'Week_Num'])['units'].sum().reset_index()
+            # Applica filtri globali (autore, titolo) alla heatmap
+            if filters.get('title', []):
+                adelphi_df = adelphi_df[adelphi_df['title'].isin(filters['title'])]
+            if filters.get('author', []):
+                adelphi_df = adelphi_df[adelphi_df['author'].isin(filters['author'])]
             adelphi_df.sort_values(['title', 'Week_Num'], inplace=True)
             
             # Calcola le differenze percentuali rispetto alla settimana precedente per ogni titolo
