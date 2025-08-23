@@ -186,7 +186,9 @@ if dataframes:
 
                     # Top 10 Autori
                     st.subheader("Top 10 Autori")
-                    top_authors = filtered_df.groupby("author")["units"].sum().nlargest(10).reset_index()
+                    author_units = filtered_df.groupby("author")["units"].sum()
+                    author_units = author_units[author_units.index != 'AA.VV.']  # Escludi "AA.VV."
+                    top_authors = author_units.nlargest(10).reset_index()
                     chart2 = alt.Chart(top_authors).mark_bar(color='#54a24b').encode(
                         x=alt.X('author:N', sort='-y', title='Autore'),
                         y=alt.Y('units:Q', title='Unità Vendute'),
