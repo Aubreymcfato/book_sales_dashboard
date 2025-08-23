@@ -240,7 +240,7 @@ if dataframes:
 
     # Sezione: Scheda Analisi Adelphi - Analisi specifica per l'editore 'Adelphi', con heatmap delle variazioni settimanali
     with tab3:
-        st.header("Analisi Variazioni Settimanali per Adelphi")
+        st.header("Heatmap Adelphi")
         
         # Raccolgo i dati solo per publisher == 'Adelphi'
         adelphi_data = []
@@ -281,7 +281,7 @@ if dataframes:
             pivot_df = pivot_df.merge(adelphi_df[['Settimana', 'Week_Num']].drop_duplicates(), on='Settimana')  # Aggiungi Week_Num per sort
             
             # Heatmap con Altair: colori basati su Diff_pct (rosso per negativo, verde per positivo)
-            st.subheader("Heatmap Variazioni Percentuali (%) - Verde: Crescita, Rosso: Calo")
+            st.subheader("Variazioni percentuali da una settimana all'altra: verde cresce, rosso cala")
             heatmap = alt.Chart(pivot_df).mark_rect().encode(
                 x=alt.X('Settimana:O', sort=alt.EncodingSortField(field='Week_Num', order='ascending')),
                 y=alt.Y('title:O', sort=total_units_per_title),
