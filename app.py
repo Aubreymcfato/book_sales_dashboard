@@ -123,8 +123,8 @@ else:
 
 # Sezione: Logica principale della dashboard
 if dataframes:
-    # Crea schede (tabs) come richiesto: una principale con filtri, una per comparazioni, una per analisi Adelphi
-    tab1, tab2, tab3 = st.tabs(["Principale", "Comparazioni", "Analisi Adelphi"])
+    # Crea schede (tabs) come richiesto: una principale con filtri, una per analisi Adelphi (rimossa "Comparazioni")
+    tab1, tab3 = st.tabs(["Principale", "Analisi Adelphi"])
 
     # Sezione: Scheda Principale - Gestisce selezione settimana, filtri in italiano, dati e statistiche
     with tab1:
@@ -187,7 +187,7 @@ if dataframes:
                     # Top 10 Autori
                     st.subheader("Top 10 Autori")
                     author_units = filtered_df.groupby("author")["units"].sum()
-                    author_units = author_units[author_units.index != 'AA.VV.']  # Escludi "AA.VV."
+                    author_units = author_units[author_units.index != 'AA.VV']  # Escludi "AA.VV"
                     top_authors = author_units.nlargest(10).reset_index()
                     chart2 = alt.Chart(top_authors).mark_bar(color='#54a24b').encode(
                         x=alt.X('author:N', sort='-y', title='Autore'),
@@ -208,41 +208,68 @@ if dataframes:
                 except Exception as e:
                     st.error(f"Errore nei grafici: {e}")
 
-    # Sezione: Scheda Comparazioni - Solo per confronti tra settimane, senza filtri generali
-    with tab2:
-        st.header("Confronto tra Settimane")
-        compare_by = st.sidebar.selectbox("Confronta per", ["title", "author", "publisher"], format_func=lambda x: {"title": "Titolo", "author": "Autore", "publisher": "Editore"}[x])  # Etichette in italiano
-        if compare_by in df.columns:  # Usa l'ultimo df caricato per opzioni
-            items = sorted(df[compare_by].dropna().unique())
-            selected_items = st.sidebar.multiselect(f"Seleziona { {'title': 'Titoli', 'author': 'Autori', 'publisher': 'Editori'}[compare_by] }", items)  # Multi-select in italiano
-            if selected_items:
-                trend_data = []
-                for week, week_df in sorted(dataframes.items(), key=lambda x: int(re.search(r'Settimana\s*(\d+)', x[0], re.IGNORECASE).group(1))):
-                    week_num = int(re.search(r'Settimana\s*(\d+)', week, re.IGNORECASE).group(1))  # Estrae il numero della settimana per ordinamento
-                    if week_df is not None and compare_by in week_df.columns:
-                        for item in selected_items:
-                            item_df = week_df[week_df[compare_by] == item]
-                            if not item_df.empty:
-                                trend_data.append({"Settimana": week, "Unità Vendute": item_df["units"].sum(), "Item": item, "Week_Num": week_num})
-                if trend_data:
-                    trend_df = pd.DataFrame(trend_data)
-                    trend_df.sort_values('Week_Num', inplace=True)  # Ordina il DataFrame per Week_Num
-                    st.subheader(f"Andamento per { {'title': 'Titolo', 'author': 'Autore', 'publisher': 'Editore'}[compare_by] }")
-                    # Grafico linea con Altair per confronti (più bello, con colori, tooltips e interattività)
-                    chart = alt.Chart(trend_df).mark_line(point=True).encode(
-                        x=alt.X('Settimana:N', sort=alt.EncodingSortField(field='Week_Num', order='ascending'), title='Settimana'),
-                        y=alt.Y('Unità Vendute:Q', title='Unità Vendute'),
-                        color=alt.Color('Item:N', legend=alt.Legend(title="Item")),
-                        tooltip=['Settimana', 'Unità Vendute', 'Item']
-                    ).properties(width='container').interactive()
-                    st.altair_chart(chart, use_container_width=True)
-                    st.dataframe(trend_df)
-                else:
-                    st.info(f"Nessun dato per i selezionati.")
+                # Sezione: Grafico Andamento Settimanale (solo se settimana == "Tutti" e selezione di titolo, autore o editore)
+                if is_aggregate:
+                    trend_data = []
+                    selected_title = filters.get('title', [])
+                    selected_author = filters.get('author', [])
+                    selected_publisher = filters.get('publisher', [])
+                    if selected_title or selected_author or selected_publisher:
+                        st.header("Andamento Settimanale")
+                        for week, week_df in sorted(dataframes.items(), key=lambda x: int(re.search(r'Settimana\s*(\d+)', x[0], re.IGNORECASE).group(1))):
+                            week_num = int(re.search(r'Settimana\s*(\d+)', week, re.IGNORECASE).group(1))
+                            if week_df is not None:
+                                # Filtra per selezioni
+                                week_filtered = week_df.copy()
+                                if selected_title:
+                                    week_filtered = week_filtered[week_filtered['title'].isin(selected_title)]
+                                    group_by = 'title'
+                                    selected_items = selected_title
+                                elif selected_publisher:
+                                    week_filtered = week_filtered[week_filtered['publisher'].isin(selected_publisher)]
+                                    group_by = 'publisher'
+                                    selected_items = selected_publisher
+                                elif selected_author:
+                                    week_filtered = week_filtered[week_filtered['author'].isin(selected_author)]
+                                    group_by = 'title'  # Per autori, aggrega per titolo per linee multiple
+                                    selected_items = week_filtered['title'].unique().tolist()  # Tutti i libri dell'autore
+
+                                if not week_filtered.empty:
+                                    if selected_author and selected_items:  # Per autori, linee multiple per libri
+                                        for item in selected_items:
+                                            item_df = week_filtered[week_filtered[group_by] == item]
+                                            if not item_df.empty:
+                                                trend_data.append({"Settimana": week, "Unità Vendute": item_df["units"].sum(), "Item": item, "Week_Num": week_num})
+                                    else:  # Per titolo o editore, somma
+                                        for item in selected_items:
+                                            item_df = week_filtered[week_filtered[group_by] == item]
+                                            if not item_df.empty:
+                                                trend_data.append({"Settimana": week, "Unità Vendute": item_df["units"].sum(), "Item": item, "Week_Num": week_num})
+
+                        if trend_data:
+                            trend_df = pd.DataFrame(trend_data)
+                            trend_df.sort_values('Week_Num', inplace=True)
+                            if selected_title:
+                                subheader = "Andamento per Titolo"
+                            elif selected_author:
+                                subheader = "Andamento per Libri dell'Autore"
+                            elif selected_publisher:
+                                subheader = "Andamento per Editore (Somma)"
+                            st.subheader(subheader)
+                            chart = alt.Chart(trend_df).mark_line(point=True).encode(
+                                x=alt.X('Settimana:N', sort=alt.EncodingSortField(field='Week_Num', order='ascending'), title='Settimana'),
+                                y=alt.Y('Unità Vendute:Q', title='Unità Vendute'),
+                                color=alt.Color('Item:N', legend=alt.Legend(title="Item")),
+                                tooltip=['Settimana', 'Unità Vendute', 'Item']
+                            ).properties(width='container').interactive()
+                            st.altair_chart(chart, use_container_width=True)
+                            st.dataframe(trend_df)
+                        else:
+                            st.info("Nessun dato per la selezione.")
 
     # Sezione: Scheda Analisi Adelphi - Analisi specifica per l'editore 'Adelphi', con heatmap delle variazioni settimanali
     with tab3:
-        st.header("Heatmap Adelphi")
+        st.header("Analisi Variazioni Settimanali per Adelphi")
         
         # Raccolgo i dati solo per publisher == 'Adelphi'
         adelphi_data = []
@@ -283,7 +310,7 @@ if dataframes:
             pivot_df = pivot_df.merge(adelphi_df[['Settimana', 'Week_Num']].drop_duplicates(), on='Settimana')  # Aggiungi Week_Num per sort
             
             # Heatmap con Altair: colori basati su Diff_pct (rosso per negativo, verde per positivo)
-            st.subheader("Variazioni percentuali da una settimana all'altra: verde cresce, rosso cala")
+            st.subheader("Heatmap Variazioni Percentuali (%) - Verde: Crescita, Rosso: Calo")
             heatmap = alt.Chart(pivot_df).mark_rect().encode(
                 x=alt.X('Settimana:O', sort=alt.EncodingSortField(field='Week_Num', order='ascending')),
                 y=alt.Y('title:O', sort=total_units_per_title),
