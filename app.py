@@ -210,16 +210,16 @@ if dataframes:
 
                 # Sezione: Grafico Andamento Settimanale (solo se settimana == "Tutti" e selezione di titolo, autore o editore)
                 if is_aggregate:
-                    trend_data = []
                     selected_title = filters.get('title', [])
                     selected_author = filters.get('author', [])
                     selected_publisher = filters.get('publisher', [])
                     if selected_title or selected_author or selected_publisher:
                         st.header("Andamento Settimanale")
+                        trend_data_books = []  # Per libri singoli (se autore)
+                        trend_data_sum = []    # Per somma (autore, editore, titolo)
                         for week, week_df in sorted(dataframes.items(), key=lambda x: int(re.search(r'Settimana\s*(\d+)', x[0], re.IGNORECASE).group(1))):
                             week_num = int(re.search(r'Settimana\s*(\d+)', week, re.IGNORECASE).group(1))
                             if week_df is not None:
-                                # Filtra per selezioni
                                 week_filtered = week_df.copy()
                                 if selected_title:
                                     week_filtered = week_filtered[week_filtered['title'].isin(selected_title)]
@@ -232,40 +232,56 @@ if dataframes:
                                 elif selected_author:
                                     week_filtered = week_filtered[week_filtered['author'].isin(selected_author)]
                                     group_by = 'title'  # Per autori, aggrega per titolo per linee multiple
-                                    selected_items = week_filtered['title'].unique().tolist()  # Tutti i libri dell'autore
+                                    selected_items_books = week_filtered['title'].unique().tolist()  # Tutti i libri dell'autore
+                                    selected_items_sum = selected_author  # Per somma per autore
 
                                 if not week_filtered.empty:
-                                    if selected_author and selected_items:  # Per autori, linee multiple per libri
-                                        for item in selected_items:
-                                            item_df = week_filtered[week_filtered[group_by] == item]
-                                            if not item_df.empty:
-                                                trend_data.append({"Settimana": week, "Unità Vendute": item_df["units"].sum(), "Item": item, "Week_Num": week_num})
-                                    else:  # Per titolo o editore, somma
-                                        for item in selected_items:
-                                            item_df = week_filtered[week_filtered[group_by] == item]
-                                            if not item_df.empty:
-                                                trend_data.append({"Settimana": week, "Unità Vendute": item_df["units"].sum(), "Item": item, "Week_Num": week_num})
+                                    # Per somma (per titolo, editore, o autore)
+                                    for item in selected_items_sum if selected_author else selected_items:
+                                        item_df = week_filtered[week_filtered['author' if selected_author else group_by] == item] if selected_author else week_filtered[week_filtered[group_by] == item]
+                                        if not item_df.empty:
+                                            trend_data_sum.append({"Settimana": week, "Unità Vendute": item_df["units"].sum(), "Item": item, "Week_Num": week_num})
 
-                        if trend_data:
-                            trend_df = pd.DataFrame(trend_data)
-                            trend_df.sort_values('Week_Num', inplace=True)
+                                    # Per libri singoli (solo per autore)
+                                    if selected_author and selected_items_books:
+                                        for item in selected_items_books:
+                                            item_df = week_filtered[week_filtered[group_by] == item]
+                                            if not item_df.empty:
+                                                trend_data_books.append({"Settimana": week, "Unità Vendute": item_df["units"].sum(), "Item": item, "Week_Num": week_num})
+
+                        # Grafico per somma
+                        if trend_data_sum:
+                            trend_df_sum = pd.DataFrame(trend_data_sum)
+                            trend_df_sum.sort_values('Week_Num', inplace=True)
                             if selected_title:
-                                subheader = "Andamento per Titolo"
+                                subheader_sum = "Andamento per Titolo"
                             elif selected_author:
-                                subheader = "Andamento per Libri dell'Autore"
+                                subheader_sum = "Andamento per Autore (Somma)"
                             elif selected_publisher:
-                                subheader = "Andamento per Editore (Somma)"
-                            st.subheader(subheader)
-                            chart = alt.Chart(trend_df).mark_line(point=True).encode(
+                                subheader_sum = "Andamento per Editore (Somma)"
+                            st.subheader(subheader_sum)
+                            chart_sum = alt.Chart(trend_df_sum).mark_line(point=True).encode(
                                 x=alt.X('Settimana:N', sort=alt.EncodingSortField(field='Week_Num', order='ascending'), title='Settimana'),
                                 y=alt.Y('Unità Vendute:Q', title='Unità Vendute'),
                                 color=alt.Color('Item:N', legend=alt.Legend(title="Item")),
                                 tooltip=['Settimana', 'Unità Vendute', 'Item']
                             ).properties(width='container').interactive()
-                            st.altair_chart(chart, use_container_width=True)
-                            st.dataframe(trend_df)
-                        else:
-                            st.info("Nessun dato per la selezione.")
+                            st.altair_chart(chart_sum, use_container_width=True)
+                            st.dataframe(trend_df_sum)
+
+                        # Grafico per libri singoli (solo se autore)
+                        if selected_author and trend_data_books:
+                            trend_df_books = pd.DataFrame(trend_data_books)
+                            trend_df_books.sort_values('Week_Num', inplace=True)
+                            st.subheader("Andamento per Libri dell'Autore")
+                            chart_books = alt.Chart(trend_df_books).mark_line(point=True).encode(
+                                x=alt.X('Settimana:N', sort=alt.EncodingSortField(field='Week_Num', order='ascending'), title='Settimana'),
+                                y=alt.Y('Unità Vendute:Q', title='Unità Vendute'),
+                                color=alt.Color('Item:N', legend=alt.Legend(title="Libro")),
+                                tooltip=['Settimana', 'Unità Vendute', 'Item']
+                            ).properties(width='container').interactive()
+                            st.altair_chart(chart_books, use_container_width=True)
+                            st.dataframe(trend_df_books)
 
     # Sezione: Scheda Analisi Adelphi - Analisi specifica per l'editore 'Adelphi', con heatmap delle variazioni settimanali
     with tab3:
