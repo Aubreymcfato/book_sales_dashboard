@@ -255,6 +255,8 @@ if dataframes:
         
         if adelphi_data:
             adelphi_df = pd.concat(adelphi_data, ignore_index=True)
+            # Aggrega per titolo e settimana per gestire duplicati
+            adelphi_df = adelphi_df.groupby(['title', 'Settimana', 'Week_Num'])['units'].sum().reset_index()
             adelphi_df.sort_values(['title', 'Week_Num'], inplace=True)
             
             # Calcola le differenze rispetto alla settimana precedente per ogni titolo
@@ -263,8 +265,13 @@ if dataframes:
             adelphi_df['Diff'] = adelphi_df['Diff'].fillna(0)  # Per la prima settimana, diff = 0
             
             # Pivot per heatmap: righe = title, colonne = Settimana, valori = Diff (per colori), ma mostra units nel tooltip
-            pivot_df = adelphi_df.pivot(index='title', columns='Settimana', values=['Diff', 'units'])
-            pivot_df = pivot_df.stack(level=0).reset_index()  # Per formato long per Altair
+            pivot_diff = adelphi_df.pivot(index='title', columns='Settimana', values='Diff')
+            pivot_units = adelphi_df.pivot(index='title', columns='Settimana', values='units')
+            # Per formato long, melt entrambi e merge
+            pivot_diff_long = pivot_diff.reset_index().melt(id_vars='title', var_name='Settimana', value_name='Diff')
+            pivot_units_long = pivot_units.reset_index().melt(id_vars='title', var_name='Settimana', value_name='units')
+            pivot_df = pd.merge(pivot_diff_long, pivot_units_long, on=['title', 'Settimana'])
+            pivot_df = pivot_df.merge(adelphi_df[['Settimana', 'Week_Num']].drop_duplicates(), on='Settimana')  # Aggiungi Week_Num per sort
             
             # Heatmap con Altair: colori basati su Diff (rosso per negativo, verde per positivo)
             st.subheader("Heatmap Variazioni (Diff) - Verde: Crescita, Rosso: Calo")
