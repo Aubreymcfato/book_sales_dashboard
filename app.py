@@ -5,6 +5,7 @@ import os
 import glob
 import re
 import io  # Per esportazione CSV
+import numpy as np  # Aggiunto per gestire np.where e np.nan
 
 # Sezione: Configurazione iniziale della pagina Streamlit
 # Qui impostiamo il titolo, il layout e uno stile personalizzato per un look più moderno
@@ -259,32 +260,38 @@ if dataframes:
             adelphi_df = adelphi_df.groupby(['title', 'Settimana', 'Week_Num'])['units'].sum().reset_index()
             adelphi_df.sort_values(['title', 'Week_Num'], inplace=True)
             
-            # Calcola le differenze rispetto alla settimana precedente per ogni titolo
+            # Calcola le differenze percentuali rispetto alla settimana precedente per ogni titolo
             adelphi_df['Previous_Units'] = adelphi_df.groupby('title')['units'].shift(1)
-            adelphi_df['Diff'] = adelphi_df['units'] - adelphi_df['Previous_Units']
-            adelphi_df['Diff'] = adelphi_df['Diff'].fillna(0)  # Per la prima settimana, diff = 0
+            adelphi_df['Diff_pct'] = np.where(
+                adelphi_df['Previous_Units'] > 0,
+                (adelphi_df['units'] - adelphi_df['Previous_Units']) / adelphi_df['Previous_Units'] * 100,
+                0  # Imposta a 0 per la prima settimana o se previous <= 0
+            )
             
-            # Pivot per heatmap: righe = title, colonne = Settimana, valori = Diff (per colori), ma mostra units nel tooltip
-            pivot_diff = adelphi_df.pivot(index='title', columns='Settimana', values='Diff')
+            # Calcola il totale venduto per titolo per ordinare i titoli da most sold a least sold
+            total_units_per_title = adelphi_df.groupby('title')['units'].sum().sort_values(ascending=False).index.tolist()
+            
+            # Pivot per heatmap: righe = title, colonne = Settimana, valori = Diff_pct (per colori), units per tooltip
+            pivot_diff_pct = adelphi_df.pivot(index='title', columns='Settimana', values='Diff_pct')
             pivot_units = adelphi_df.pivot(index='title', columns='Settimana', values='units')
             # Per formato long, melt entrambi e merge
-            pivot_diff_long = pivot_diff.reset_index().melt(id_vars='title', var_name='Settimana', value_name='Diff')
+            pivot_diff_pct_long = pivot_diff_pct.reset_index().melt(id_vars='title', var_name='Settimana', value_name='Diff_pct')
             pivot_units_long = pivot_units.reset_index().melt(id_vars='title', var_name='Settimana', value_name='units')
-            pivot_df = pd.merge(pivot_diff_long, pivot_units_long, on=['title', 'Settimana'])
+            pivot_df = pd.merge(pivot_diff_pct_long, pivot_units_long, on=['title', 'Settimana'])
             pivot_df = pivot_df.merge(adelphi_df[['Settimana', 'Week_Num']].drop_duplicates(), on='Settimana')  # Aggiungi Week_Num per sort
             
-            # Heatmap con Altair: colori basati su Diff (rosso per negativo, verde per positivo)
-            st.subheader("Heatmap Variazioni (Diff) - Verde: Crescita, Rosso: Calo")
+            # Heatmap con Altair: colori basati su Diff_pct (rosso per negativo, verde per positivo)
+            st.subheader("Heatmap Variazioni Percentuali (%) - Verde: Crescita, Rosso: Calo")
             heatmap = alt.Chart(pivot_df).mark_rect().encode(
                 x=alt.X('Settimana:O', sort=alt.EncodingSortField(field='Week_Num', order='ascending')),
-                y='title:O',
-                color=alt.Color('Diff:Q', scale=alt.Scale(scheme='redyellowgreen', domainMid=0), title='Variazione'),
-                tooltip=['title', 'Settimana', 'units', 'Diff']
+                y=alt.Y('title:O', sort=total_units_per_title),
+                color=alt.Color('Diff_pct:Q', scale=alt.Scale(scheme='redyellowgreen', domainMid=0), title='Variazione %'),
+                tooltip=['title', 'Settimana', 'units', 'Diff_pct']
             ).properties(width='container').interactive()
             st.altair_chart(heatmap, use_container_width=True)
             
             # Mostra anche il dataframe raw per riferimento
-            st.dataframe(adelphi_df[['title', 'Settimana', 'units', 'Diff']])
+            st.dataframe(adelphi_df[['title', 'Settimana', 'units', 'Diff_pct']])
         else:
             st.info("Nessun dato disponibile per l'editore 'Adelphi'.")
 else:
