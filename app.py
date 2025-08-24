@@ -190,7 +190,7 @@ if dataframes:
                     # Top 10 Autori - Gestisci singolo valore con metric
                     st.subheader("Top 10 Autori")
                     author_units = filtered_df.groupby("author")["units"].sum()
-                    author_units = author_units[author_units.index != 'AA.VV']  # Escludi "AA.VV"
+                    author_units = author_units[author_units.index != 'AA.VV.']  # Escludi "AA.VV."
                     top_authors = author_units.nlargest(10).reset_index()
                     if len(top_authors) == 1:
                         st.metric(label=top_authors['author'].iloc[0], value=top_authors['units'].iloc[0])
