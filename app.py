@@ -34,9 +34,11 @@ DATA_DIR = "data"
 # Sezione: Funzione per normalizzare titoli (per congiungere varianti come "L' avversario" e "L'avversario")
 def normalize_title(title):
     if isinstance(title, str):
-        title = title.strip().lower()
-        if title in ["l' avversario", "l'avversario"]:
+        stripped = title.strip()
+        lower_stripped = stripped.lower()
+        if lower_stripped in ["l' avversario", "l'avversario"]:
             return "L'avversario"
+        return stripped  # Ritorna originale stripped, non lower
     return title
 
 # Sezione: Funzione per caricare i dati da un file XLSX
@@ -372,10 +374,10 @@ if dataframes:
                 y=alt.Y('title:O', sort=total_units_per_title),
                 color=alt.Color('Diff_pct:Q', scale=alt.Scale(scheme='redyellowgreen', domainMid=0), title='Variazione %'),
                 tooltip=['title', 'Settimana', 'units', 'Diff_pct']
-            ).properties(width='container').interactive()
+            ).properties(width='container').interactive(bind_y=True)  # Abilita zoom su y (titoli)
             st.altair_chart(heatmap, use_container_width=True)
             
-            # Mostra anche il dataframe raw per riferimento
+            # Mostra anche il dataframe raw per riferimento (per CTRL+F sui titoli)
             st.dataframe(adelphi_df[['title', 'Settimana', 'units', 'Diff_pct']])
         else:
             st.info("Nessun dato disponibile per l'editore 'Adelphi'.")
