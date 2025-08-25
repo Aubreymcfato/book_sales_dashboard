@@ -31,6 +31,14 @@ st.markdown("""
 # Mantengo l'idea di una cartella 'data' con file XLSX
 DATA_DIR = "data"
 
+# Sezione: Funzione per normalizzare titoli (per congiungere varianti come "L' avversario" e "L'avversario")
+def normalize_title(title):
+    if isinstance(title, str):
+        title = title.strip().lower()
+        if title in ["l' avversario", "l'avversario"]:
+            return "L'avversario"
+    return title
+
 # Sezione: Funzione per caricare i dati da un file XLSX
 # Questa funzione legge un singolo file XLSX, standardizza le colonne, filtra righe valide e converte tipi numerici
 @st.cache_data
@@ -52,6 +60,9 @@ def load_data(file_path):
         for col in numeric_cols:
             if col in df.columns:
                 df[col] = pd.to_numeric(df[col], errors="coerce")
+        # Normalizza titoli
+        if 'title' in df.columns:
+            df['title'] = df['title'].apply(normalize_title)
         return df
     except Exception as e:
         st.error(f"Errore nel caricamento di {os.path.basename(file_path)}: {e}")
@@ -99,6 +110,9 @@ def aggregate_all_weeks(dataframes):
     if not all_dfs:
         return None
     combined_df = pd.concat(all_dfs, ignore_index=True)
+    # Normalizza titoli nel combined_df
+    if 'title' in combined_df.columns:
+        combined_df['title'] = combined_df['title'].apply(normalize_title)
     agg_df = combined_df.groupby(["publisher", "author", "title"], as_index=False)["units"].sum()
     return agg_df
 
@@ -200,7 +214,7 @@ if dataframes:
                     # Top 10 Autori - Gestisci singolo valore con metric
                     st.subheader("Top 10 Autori")
                     author_units = filtered_df.groupby("author")["units"].sum()
-                    author_units = author_units[author_units.index != 'AA.VV.']  # Escludi "AA.VV"
+                    author_units = author_units[author_units.index != 'AA.VV.']  # Escludi "AA.VV." (con punto)
                     top_authors = author_units.nlargest(10).reset_index()
                     if len(top_authors) == 1:
                         st.metric(label=top_authors['author'].iloc[0], value=top_authors['units'].iloc[0])
