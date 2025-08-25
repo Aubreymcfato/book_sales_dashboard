@@ -129,7 +129,13 @@ if dataframes:
     # Sezione: Scheda Principale - Gestisce selezione settimana, filtri in italiano, dati e statistiche
     with tab1:
         week_options = ["Tutti"] + sorted(dataframes.keys(), key=lambda x: int(re.search(r'Settimana\s*(\d+)', x, re.IGNORECASE).group(1)))
-        selected_week = st.sidebar.selectbox("Seleziona la Settimana", week_options)  # Filtro in italiano
+        # Sincronizza con query_params
+        query_params = st.query_params.to_dict()
+        initial_week = query_params.get('selected_week', ["Tutti"])[0]
+        if initial_week not in week_options:
+            initial_week = "Tutti"
+        selected_week = st.sidebar.selectbox("Seleziona la Settimana", week_options, index=week_options.index(initial_week))  # Filtro in italiano
+        st.query_params['selected_week'] = selected_week
         
         is_aggregate = selected_week == "Tutti"
         if is_aggregate:
@@ -145,10 +151,14 @@ if dataframes:
             for col in filter_cols:
                 if col in df.columns:
                     unique_values = sorted(df[col].dropna().unique())
+                    initial_value = query_params.get(col, [])
                     if col == "rank":
-                        filters[col] = st.sidebar.selectbox(filter_labels[col], ["Tutti"] + [str(val) for val in unique_values], index=0)
+                        initial_value = initial_value[0] if initial_value else "Tutti"
+                        filters[col] = st.sidebar.selectbox(filter_labels[col], ["Tutti"] + [str(val) for val in unique_values], index=0 if initial_value == "Tutti" else unique_values.index(float(initial_value)) + 1)
+                        st.query_params[col] = str(filters[col]) if filters[col] != "Tutti" else []
                     else:
-                        filters[col] = st.sidebar.multiselect(filter_labels[col], unique_values)  # Multi-select per confronti multipli
+                        filters[col] = st.sidebar.multiselect(filter_labels[col], unique_values, default=initial_value)
+                        st.query_params[col] = filters[col]
 
             filtered_df = filter_data(df, filters, is_aggregate=is_aggregate)
             if filtered_df is not None and not filtered_df.empty:
@@ -190,7 +200,7 @@ if dataframes:
                     # Top 10 Autori - Gestisci singolo valore con metric
                     st.subheader("Top 10 Autori")
                     author_units = filtered_df.groupby("author")["units"].sum()
-                    author_units = author_units[author_units.index != 'AA.VV.']  # Escludi "AA.VV."
+                    author_units = author_units[author_units.index != 'AA.VV.']  # Escludi "AA.VV"
                     top_authors = author_units.nlargest(10).reset_index()
                     if len(top_authors) == 1:
                         st.metric(label=top_authors['author'].iloc[0], value=top_authors['units'].iloc[0])
@@ -234,10 +244,12 @@ if dataframes:
                                     week_filtered = week_filtered[week_filtered['title'].isin(selected_title)]
                                     group_by = 'title'
                                     selected_items = selected_title
+                                    selected_items_sum = selected_title
                                 elif selected_publisher:
                                     week_filtered = week_filtered[week_filtered['publisher'].isin(selected_publisher)]
                                     group_by = 'publisher'
                                     selected_items = selected_publisher
+                                    selected_items_sum = selected_publisher
                                 elif selected_author:
                                     week_filtered = week_filtered[week_filtered['author'].isin(selected_author)]
                                     group_by = 'title'  # Per autori, aggrega per titolo per linee multiple
@@ -246,7 +258,7 @@ if dataframes:
 
                                 if not week_filtered.empty:
                                     # Per somma (per titolo, editore, o autore)
-                                    for item in selected_items_sum if selected_author else selected_items:
+                                    for item in selected_items_sum:
                                         item_df = week_filtered[week_filtered['author' if selected_author else group_by] == item] if selected_author else week_filtered[week_filtered[group_by] == item]
                                         if not item_df.empty:
                                             trend_data_sum.append({"Settimana": week, "Unità Vendute": item_df["units"].sum(), "Item": item, "Week_Num": week_num})
