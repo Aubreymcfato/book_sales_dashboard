@@ -94,7 +94,7 @@ def filter_data(df, filters, is_aggregate=False):
 def aggregate_group_data(df, group_by, values):
     if df is None or not values:
         return None
-    group_df = df[df[group_by].isin(values)] if isinstance(values, list) else df[df[group_by] == values]
+    group_df = df[df[group_by].isin(values)] if isinstance(value, list) else df[df[group_by] == values]
     if group_df.empty:
         return None
     return {
@@ -200,12 +200,10 @@ if dataframes:
                 # Sezione: Analisi Grafica nella scheda principale (usando Altair per grafiche più belle)
                 st.header("Analisi Grafica")
                 try:
-                    # Top 20 Libri - Gestisci singolo valore con metric invece di chart
-                    st.subheader("Top 20 Libri")
+                    # Top 20 Libri - Mostra solo se più di un valore
                     top_books = filtered_df.nlargest(20, "units")[["title", "units"]]
-                    if len(top_books) == 1:
-                        st.metric(label=top_books['title'].iloc[0], value=top_books['units'].iloc[0])
-                    else:
+                    if len(top_books) > 1:
+                        st.subheader("Top 20 Libri")
                         chart1 = alt.Chart(top_books).mark_bar(color='#4c78a8').encode(
                             x=alt.X('title:N', sort='-y', title='Titolo'),
                             y=alt.Y('units:Q', title='Unità Vendute'),
@@ -213,14 +211,12 @@ if dataframes:
                         ).properties(width='container').interactive()
                         st.altair_chart(chart1, use_container_width=True)
 
-                    # Top 10 Autori - Gestisci singolo valore con metric
-                    st.subheader("Top 10 Autori")
+                    # Top 10 Autori - Mostra solo se più di un valore
                     author_units = filtered_df.groupby("author")["units"].sum()
                     author_units = author_units[author_units.index != 'AA.VV.']  # Escludi "AA.VV." (con punto)
                     top_authors = author_units.nlargest(10).reset_index()
-                    if len(top_authors) == 1:
-                        st.metric(label=top_authors['author'].iloc[0], value=top_authors['units'].iloc[0])
-                    else:
+                    if len(top_authors) > 1:
+                        st.subheader("Top 10 Autori")
                         chart2 = alt.Chart(top_authors).mark_bar(color='#54a24b').encode(
                             x=alt.X('author:N', sort='-y', title='Autore'),
                             y=alt.Y('units:Q', title='Unità Vendute'),
@@ -228,12 +224,10 @@ if dataframes:
                         ).properties(width='container').interactive()
                         st.altair_chart(chart2, use_container_width=True)
 
-                    # Top 10 Editori - Gestisci singolo valore con metric
-                    st.subheader("Top 10 Editori")
+                    # Top 10 Editori - Mostra solo se più di un valore
                     top_publishers = filtered_df.groupby("publisher")["units"].sum().nlargest(10).reset_index()
-                    if len(top_publishers) == 1:
-                        st.metric(label=top_publishers['publisher'].iloc[0], value=top_publishers['units'].iloc[0])
-                    else:
+                    if len(top_publishers) > 1:
+                        st.subheader("Top 10 Editori")
                         chart3 = alt.Chart(top_publishers).mark_bar(color='#e45756').encode(
                             x=alt.X('publisher:N', sort='-y', title='Editore'),
                             y=alt.Y('units:Q', title='Unità Vendute'),
@@ -306,7 +300,7 @@ if dataframes:
                             st.altair_chart(chart_sum, use_container_width=True)
                             st.dataframe(trend_df_sum)
 
-                        # Grafico per libri singoli (solo se autore)
+                        # Grafico per libri singoli (solo per autore)
                         if selected_author and trend_data_books:
                             trend_df_books = pd.DataFrame(trend_data_books)
                             trend_df_books.sort_values('Week_Num', inplace=True)
@@ -319,6 +313,35 @@ if dataframes:
                             ).properties(width='container').interactive()
                             st.altair_chart(chart_books, use_container_width=True)
                             st.dataframe(trend_df_books)
+
+                        # Grafico aggiuntivo: Andamento settimanale dei primi 20 libri di un singolo editore
+                        if len(selected_publisher) == 1 and is_aggregate:
+                            trend_data_publisher_books = []
+                            # Trova i primi 20 libri dell'editore per vendite totali
+                            publisher_books = aggregate_all_weeks(dataframes)
+                            publisher_books = publisher_books[publisher_books['publisher'].isin(selected_publisher)]
+                            top_20_titles = publisher_books.nlargest(20, 'units')['title'].tolist()
+                            for week, week_df in sorted(dataframes.items(), key=lambda x: int(re.search(r'Settimana\s*(\d+)', x[0], re.IGNORECASE).group(1))):
+                                week_num = int(re.search(r'Settimana\s*(\d+)', week, re.IGNORECASE).group(1))
+                                if week_df is not None:
+                                    week_filtered = week_df[week_df['publisher'].isin(selected_publisher)]
+                                    if not week_filtered.empty:
+                                        for title in top_20_titles:
+                                            title_df = week_filtered[week_filtered['title'] == title]
+                                            if not title_df.empty:
+                                                trend_data_publisher_books.append({"Settimana": week, "Unità Vendute": title_df["units"].sum(), "Libro": title, "Week_Num": week_num})
+                            if trend_data_publisher_books:
+                                trend_df_publisher_books = pd.DataFrame(trend_data_publisher_books)
+                                trend_df_publisher_books.sort_values('Week_Num', inplace=True)
+                                st.subheader(f"Andamento Settimanale dei Primi 20 Libri dell'Editore")
+                                chart_publisher_books = alt.Chart(trend_df_publisher_books).mark_line(point=True).encode(
+                                    x=alt.X('Settimana:N', sort=alt.EncodingSortField(field='Week_Num', order='ascending'), title='Settimana'),
+                                    y=alt.Y('Unità Vendute:Q', title='Unità Vendute'),
+                                    color=alt.Color('Libro:N', legend=alt.Legend(title="Libro")),
+                                    tooltip=['Settimana', 'Unità Vendute', 'Libro']
+                                ).properties(width='container').interactive()
+                                st.altair_chart(chart_publisher_books, use_container_width=True)
+                                st.dataframe(trend_df_publisher_books)
 
     # Sezione: Scheda Analisi Adelphi - Analisi specifica per l'editore 'Adelphi', con heatmap delle variazioni settimanali
     with tab3:
