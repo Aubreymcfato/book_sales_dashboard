@@ -1,7 +1,6 @@
 import streamlit as st
 import pandas as pd
-import altair as alt  # Per la heatmap
-import plotly.express as px  # Per i top charts e linee
+import altair as alt  # Cambiato da Plotly a Altair per grafiche più estetiche e moderne (Altair è declarativo e produce visualizzazioni belle con temi personalizzabili)
 import os
 import glob
 import re
@@ -205,9 +204,12 @@ if dataframes:
                     top_books = filtered_df.nlargest(20, "units")[["title", "units"]]
                     if len(top_books) > 1:
                         st.subheader("Top 20 Libri")
-                        fig1 = px.bar(top_books, x='title', y='units', title='Top 20 Libri')
-                        fig1.update_layout(xaxis_title='Titolo', yaxis_title='Unità Vendute', xaxis_tickangle=-45)
-                        st.plotly_chart(fig1, use_container_width=True)
+                        chart1 = alt.Chart(top_books).mark_bar(color='#4c78a8').encode(
+                            x=alt.X('title:N', sort='-y', title='Titolo'),
+                            y=alt.Y('units:Q', title='Unità Vendute'),
+                            tooltip=['title', 'units']
+                        ).properties(width='container').interactive()
+                        st.altair_chart(chart1, use_container_width=True)
 
                     # Top 10 Autori - Mostra solo se più di un valore
                     author_units = filtered_df.groupby("author")["units"].sum()
@@ -215,23 +217,23 @@ if dataframes:
                     top_authors = author_units.nlargest(10).reset_index()
                     if len(top_authors) > 1:
                         st.subheader("Top 10 Autori")
-                        fig2 = px.bar(top_authors, x='author', y='units', title='Top 10 Autori')
-                        fig2.update_layout(xaxis_title='Autore', yaxis_title='Unità Vendute', xaxis_tickangle=-45)
-                        selected_points = plotly_events(fig2)
-                        if selected_points:
-                            clicked_index = selected_points[0]['pointIndex']
-                            clicked_author = top_authors.iloc[clicked_index]['author']
-                            filters['author'] = [clicked_author]  # Aggiorna il filtro autore
-                            st.query_params['author'] = [clicked_author]  # Aggiorna query params
-                            st.experimental_rerun()  # Ricarica la pagina con il nuovo filtro
+                        chart2 = alt.Chart(top_authors).mark_bar(color='#54a24b').encode(
+                            x=alt.X('author:N', sort='-y', title='Autore'),
+                            y=alt.Y('units:Q', title='Unità Vendute'),
+                            tooltip=['author', 'units']
+                        ).properties(width='container').interactive()
+                        st.altair_chart(chart2, use_container_width=True)
 
                     # Top 10 Editori - Mostra solo se più di un valore
                     top_publishers = filtered_df.groupby("publisher")["units"].sum().nlargest(10).reset_index()
                     if len(top_publishers) > 1:
                         st.subheader("Top 10 Editori")
-                        fig3 = px.bar(top_publishers, x='publisher', y='units', title='Top 10 Editori')
-                        fig3.update_layout(xaxis_title='Editore', yaxis_title='Unità Vendute', xaxis_tickangle=-45)
-                        st.plotly_chart(fig3, use_container_width=True)
+                        chart3 = alt.Chart(top_publishers).mark_bar(color='#e45756').encode(
+                            x=alt.X('publisher:N', sort='-y', title='Editore'),
+                            y=alt.Y('units:Q', title='Unità Vendute'),
+                            tooltip=['publisher', 'units']
+                        ).properties(width='container').interactive()
+                        st.altair_chart(chart3, use_container_width=True)
                 except Exception as e:
                     st.error(f"Errore nei grafici: {e}")
 
@@ -289,19 +291,27 @@ if dataframes:
                             elif selected_publisher:
                                 subheader_sum = "Andamento per Editore (Somma)"
                             st.subheader(subheader_sum)
-                            fig_sum = px.line(trend_df_sum, x='Settimana', y='Unità Vendute', color='Item', markers=True, title=subheader_sum)
-                            fig_sum.update_layout(xaxis_title='Settimana', yaxis_title='Unità Vendute')
-                            st.plotly_chart(fig_sum, use_container_width=True)
+                            chart_sum = alt.Chart(trend_df_sum).mark_line(point=True).encode(
+                                x=alt.X('Settimana:N', sort=alt.EncodingSortField(field='Week_Num', order='ascending'), title='Settimana'),
+                                y=alt.Y('Unità Vendute:Q', title='Unità Vendute'),
+                                color=alt.Color('Item:N', legend=alt.Legend(title="Item")),
+                                tooltip=['Settimana', 'Unità Vendute', 'Item']
+                            ).properties(width='container').interactive()
+                            st.altair_chart(chart_sum, use_container_width=True)
                             st.dataframe(trend_df_sum)
 
-                        # Grafico per libri singoli (solo se autore)
+                        # Grafico per libri singoli (solo per autore)
                         if selected_author and trend_data_books:
                             trend_df_books = pd.DataFrame(trend_data_books)
                             trend_df_books.sort_values('Week_Num', inplace=True)
                             st.subheader("Andamento per Libri dell'Autore")
-                            fig_books = px.line(trend_df_books, x='Settimana', y='Unità Vendute', color='Item', markers=True, title="Andamento per Libri dell'Autore")
-                            fig_books.update_layout(xaxis_title='Settimana', yaxis_title='Unità Vendute')
-                            st.plotly_chart(fig_books, use_container_width=True)
+                            chart_books = alt.Chart(trend_df_books).mark_line(point=True).encode(
+                                x=alt.X('Settimana:N', sort=alt.EncodingSortField(field='Week_Num', order='ascending'), title='Settimana'),
+                                y=alt.Y('Unità Vendute:Q', title='Unità Vendute'),
+                                color=alt.Color('Item:N', legend=alt.Legend(title="Libro")),
+                                tooltip=['Settimana', 'Unità Vendute', 'Item']
+                            ).properties(width='container').interactive()
+                            st.altair_chart(chart_books, use_container_width=True)
                             st.dataframe(trend_df_books)
 
                         # Grafico aggiuntivo: Andamento settimanale dei primi 20 libri di un singolo editore
@@ -324,9 +334,13 @@ if dataframes:
                                 trend_df_publisher_books = pd.DataFrame(trend_data_publisher_books)
                                 trend_df_publisher_books.sort_values('Week_Num', inplace=True)
                                 st.subheader(f"Andamento Settimanale dei Primi 20 Libri dell'Editore")
-                                fig_publisher_books = px.line(trend_df_publisher_books, x='Settimana', y='Unità Vendute', color='Libro', markers=True, title="Andamento Settimanale dei Primi 20 Libri dell'Editore")
-                                fig_publisher_books.update_layout(xaxis_title='Settimana', yaxis_title='Unità Vendute')
-                                st.plotly_chart(fig_publisher_books, use_container_width=True)
+                                chart_publisher_books = alt.Chart(trend_df_publisher_books).mark_line(point=True).encode(
+                                    x=alt.X('Settimana:N', sort=alt.EncodingSortField(field='Week_Num', order='ascending'), title='Settimana'),
+                                    y=alt.Y('Unità Vendute:Q', title='Unità Vendute'),
+                                    color=alt.Color('Libro:N', legend=alt.Legend(title="Libro")),
+                                    tooltip=['Settimana', 'Unità Vendute', 'Libro']
+                                ).properties(width='container').interactive()
+                                st.altair_chart(chart_publisher_books, use_container_width=True)
                                 st.dataframe(trend_df_publisher_books)
 
     # Sezione: Scheda Analisi Adelphi - Analisi specifica per l'editore 'Adelphi', con heatmap delle variazioni settimanali
@@ -376,20 +390,15 @@ if dataframes:
             pivot_df = pd.merge(pivot_diff_pct_long, pivot_units_long, on=['title', 'Settimana'])
             pivot_df = pivot_df.merge(adelphi_df[['Settimana', 'Week_Num']].drop_duplicates(), on='Settimana')  # Aggiungi Week_Num per sort
             
-            # Heatmap con Plotly: colori basati su Diff_pct (rosso per negativo, verde per positivo)
+            # Heatmap con Altair: colori basati su Diff_pct (rosso per negativo, verde per positivo)
             st.subheader("Heatmap Variazioni Percentuali (%) - Verde: Crescita, Rosso: Calo")
-            fig_heatmap = px.imshow(
-                pivot_diff_pct.values,
-                labels=dict(x="Settimana", y="Titolo", color="Variazione %"),
-                x=pivot_diff_pct.columns,
-                y=pivot_diff_pct.index,
-                color_continuous_scale='RdYlGn',
-                color_continuous_midpoint=0,
-                aspect="auto"
-            )
-            fig_heatmap.update_layout(width=800, height=600)
-            fig_heatmap.update_traces(hovertemplate='Titolo: %{y}<br>Settimana: %{x}<br>Unità Vendute: %{customdata}<br>Variazione %: %{z:.2f}%', customdata=pivot_units.values)
-            st.plotly_chart(fig_heatmap, use_container_width=True)
+            heatmap = alt.Chart(pivot_df).mark_rect().encode(
+                x=alt.X('Settimana:O', sort=alt.EncodingSortField(field='Week_Num', order='ascending')),
+                y=alt.Y('title:O', sort=total_units_per_title),
+                color=alt.Color('Diff_pct:Q', scale=alt.Scale(scheme='redyellowgreen', domainMid=0), title='Variazione %'),
+                tooltip=['title', 'Settimana', 'units', 'Diff_pct']
+            ).properties(width='container').interactive(bind_y=True)  # Abilita zoom su y (titoli)
+            st.altair_chart(heatmap, use_container_width=True)
             
             # Mostra anche il dataframe raw per riferimento (per CTRL+F sui titoli)
             st.dataframe(adelphi_df[['title', 'Settimana', 'units', 'Diff_pct']])
