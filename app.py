@@ -216,7 +216,13 @@ if dataframes:
                         st.subheader("Top 10 Autori")
                         fig2 = px.bar(top_authors, x='author', y='units', title='Top 10 Autori')
                         fig2.update_layout(xaxis_title='Autore', yaxis_title='Unità Vendute', xaxis_tickangle=-45)
-                        st.plotly_chart(fig2, use_container_width=True)
+                        selected_points = plotly_events(fig2)
+                        if selected_points:
+                            clicked_index = selected_points[0]['pointIndex']
+                            clicked_author = top_authors.iloc[clicked_index]['author']
+                            filters['author'] = [clicked_author]  # Aggiorna il filtro autore
+                            st.query_params['author'] = [clicked_author]  # Aggiorna query params
+                            st.experimental_rerun()  # Ricarica la pagina con il nuovo filtro
 
                     # Top 10 Editori - Mostra solo se più di un valore
                     top_publishers = filtered_df.groupby("publisher")["units"].sum().nlargest(10).reset_index()
