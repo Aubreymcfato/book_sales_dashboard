@@ -94,7 +94,7 @@ def filter_data(df, filters, is_aggregate=False):
 def aggregate_group_data(df, group_by, values):
     if df is None or not values:
         return None
-    group_df = df[df[group_by].isin(values)] if isinstance(value, list) else df[df[group_by] == values]
+    group_df = df[df[group_by].isin(values)] if isinstance(values, list) else df[df[group_by] == values]
     if group_df.empty:
         return None
     return {
