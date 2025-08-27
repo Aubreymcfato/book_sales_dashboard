@@ -217,15 +217,12 @@ if dataframes:
                     top_authors = author_units.nlargest(10).reset_index()
                     if len(top_authors) > 1:
                         st.subheader("Top 10 Autori")
-                        fig2 = px.bar(top_authors, x='author', y='units', title='Top 10 Autori')
-                        fig2.update_layout(xaxis_title='Autore', yaxis_title='Unità Vendute', xaxis_tickangle=-45)
-                        selected_points = plotly_events(fig2)
-                        if selected_points:
-                            clicked_index = selected_points[0]['pointIndex']
-                            clicked_author = top_authors.iloc[clicked_index]['author']
-                            filters['author'] = [clicked_author]  # Aggiorna il filtro autore
-                            st.query_params['author'] = [clicked_author]  # Aggiorna query params
-                            st.experimental_rerun()  # Ricarica la pagina con il nuovo filtro
+                        chart2 = alt.Chart(top_authors).mark_bar(color='#54a24b').encode(
+                            x=alt.X('author:N', sort='-y', title='Autore'),
+                            y=alt.Y('units:Q', title='Unità Vendute'),
+                            tooltip=['author', 'units']
+                        ).properties(width='container').interactive()
+                        st.altair_chart(chart2, use_container_width=True)
 
                     # Top 10 Editori - Mostra solo se più di un valore
                     top_publishers = filtered_df.groupby("publisher")["units"].sum().nlargest(10).reset_index()
@@ -294,19 +291,27 @@ if dataframes:
                             elif selected_publisher:
                                 subheader_sum = "Andamento per Editore (Somma)"
                             st.subheader(subheader_sum)
-                            fig_sum = px.line(trend_df_sum, x='Settimana', y='Unità Vendute', color='Item', markers=True, title=subheader_sum)
-                            fig_sum.update_layout(xaxis_title='Settimana', yaxis_title='Unità Vendute')
-                            st.plotly_chart(fig_sum, use_container_width=True)
+                            chart_sum = alt.Chart(trend_df_sum).mark_line(point=True).encode(
+                                x=alt.X('Settimana:N', sort=alt.EncodingSortField(field='Week_Num', order='ascending'), title='Settimana'),
+                                y=alt.Y('Unità Vendute:Q', title='Unità Vendute'),
+                                color=alt.Color('Item:N', legend=alt.Legend(title="Item")),
+                                tooltip=['Settimana', 'Unità Vendute', 'Item']
+                            ).properties(width='container').interactive()
+                            st.altair_chart(chart_sum, use_container_width=True)
                             st.dataframe(trend_df_sum)
 
-                        # Grafico per libri singoli (solo se autore)
+                        # Grafico per libri singoli (solo per autore)
                         if selected_author and trend_data_books:
                             trend_df_books = pd.DataFrame(trend_data_books)
                             trend_df_books.sort_values('Week_Num', inplace=True)
                             st.subheader("Andamento per Libri dell'Autore")
-                            fig_books = px.line(trend_df_books, x='Settimana', y='Unità Vendute', color='Item', markers=True, title="Andamento per Libri dell'Autore")
-                            fig_books.update_layout(xaxis_title='Settimana', yaxis_title='Unità Vendute')
-                            st.plotly_chart(fig_books, use_container_width=True)
+                            chart_books = alt.Chart(trend_df_books).mark_line(point=True).encode(
+                                x=alt.X('Settimana:N', sort=alt.EncodingSortField(field='Week_Num', order='ascending'), title='Settimana'),
+                                y=alt.Y('Unità Vendute:Q', title='Unità Vendute'),
+                                color=alt.Color('Item:N', legend=alt.Legend(title="Libro")),
+                                tooltip=['Settimana', 'Unità Vendute', 'Item']
+                            ).properties(width='container').interactive()
+                            st.altair_chart(chart_books, use_container_width=True)
                             st.dataframe(trend_df_books)
 
                         # Grafico aggiuntivo: Andamento settimanale dei primi 20 libri di un singolo editore
@@ -329,9 +334,13 @@ if dataframes:
                                 trend_df_publisher_books = pd.DataFrame(trend_data_publisher_books)
                                 trend_df_publisher_books.sort_values('Week_Num', inplace=True)
                                 st.subheader(f"Andamento Settimanale dei Primi 20 Libri dell'Editore")
-                                fig_publisher_books = px.line(trend_df_publisher_books, x='Settimana', y='Unità Vendute', color='Libro', markers=True, title="Andamento Settimanale dei Primi 20 Libri dell'Editore")
-                                fig_publisher_books.update_layout(xaxis_title='Settimana', yaxis_title='Unità Vendute')
-                                st.plotly_chart(fig_publisher_books, use_container_width=True)
+                                chart_publisher_books = alt.Chart(trend_df_publisher_books).mark_line(point=True).encode(
+                                    x=alt.X('Settimana:N', sort=alt.EncodingSortField(field='Week_Num', order='ascending'), title='Settimana'),
+                                    y=alt.Y('Unità Vendute:Q', title='Unità Vendute'),
+                                    color=alt.Color('Libro:N', legend=alt.Legend(title="Libro")),
+                                    tooltip=['Settimana', 'Unità Vendute', 'Libro']
+                                ).properties(width='container').interactive()
+                                st.altair_chart(chart_publisher_books, use_container_width=True)
                                 st.dataframe(trend_df_publisher_books)
 
     # Sezione: Scheda Analisi Adelphi - Analisi specifica per l'editore 'Adelphi', con heatmap delle variazioni settimanali
