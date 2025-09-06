@@ -382,7 +382,7 @@ if dataframes:
             total_units_per_title = adelphi_df.groupby('title')['units'].sum().sort_values(ascending=False).index.tolist()
             
             # Pivot per heatmap: righe = title, colonne = Settimana, valori = Diff_pct (per colori), units per tooltip
-            pivot_diff_pct = adelphi_df.pivot(index='title', columns='Settimana', values='Diff_pct')
+            pivot_diff_pct = adelphi_df.pivot_table(index='title', columns='Settimana', values='Diff_pct', aggfunc='sum', fill_value=0)
             pivot_units = adelphi_df.pivot(index='title', columns='Settimana', values='units')
             # Per formato long, melt entrambi e merge
             pivot_diff_pct_long = pivot_diff_pct.reset_index().melt(id_vars='title', var_name='Settimana', value_name='Diff_pct')
