@@ -1,6 +1,10 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
+import os
+import glob
+import re
+from concurrent.futures import ThreadPoolExecutor
 
 def normalize_title(title):
     if isinstance(title, str):
@@ -74,3 +78,28 @@ def aggregate_all_weeks(dataframes):
         combined_df['title'] = combined_df['title'].apply(normalize_title)
     agg_df = combined_df.groupby(["publisher", "author", "title"], as_index=False)["units"].sum()
     return agg_df
+
+def load_all_dataframes(data_dir):
+    dataframes = {}
+    if not os.path.exists(data_dir):
+        st.error(f"Cartella {data_dir} non trovata.")
+        return dataframes
+    xlsx_files = glob.glob(os.path.join(data_dir, "Classifica week*.xlsx"))
+    valid_files = []
+    for file_path in xlsx_files:
+        match = re.search(r'week\s*(\d+)', os.path.basename(file_path), re.IGNORECASE)
+        if match:
+            valid_files.append((file_path, int(match.group(1))))
+        else:
+            st.warning(f"Nome file non valido: {os.path.basename(file_path)}")
+    valid_files = sorted(valid_files, key=lambda x: x[1])
+    file_paths = [fp for fp, _ in valid_files]
+    week_nums = [wn for _, wn in valid_files]
+    
+    with ThreadPoolExecutor() as executor:
+        dfs = list(executor.map(load_data, file_paths))
+    
+    for i in range(len(dfs)):
+        if dfs[i] is not None:
+            dataframes[f"Settimana {week_nums[i]}"] = dfs[i]
+    return dataframes
