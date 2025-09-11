@@ -1,18 +1,17 @@
 import streamlit as st
 import pandas as pd
-import altair as alt  # Cambiato da Plotly a Altair per grafiche più estetiche e moderne (Altair è declarativo e produce visualizzazioni belle con temi personalizzabili)
+import re
 import os
 import glob
-import re
-import io  # Per esportazione CSV
-import numpy as np  # Aggiunto per gestire np.where e np.nan
+from concurrent.futures import ThreadPoolExecutor
+from data_utils import normalize_title, load_data, filter_data, aggregate_group_data, aggregate_all_weeks
+from viz_utils import create_top_books_chart, create_top_authors_chart, create_top_publishers_chart, create_trend_chart, create_publisher_books_trend_chart, create_heatmap
 
-# Sezione: Configurazione iniziale della pagina Streamlit
-# Qui impostiamo il titolo, il layout e uno stile personalizzato per un look più moderno
+# Configurazione iniziale della pagina Streamlit
 st.set_page_config(page_title="Dashboard Vendite Libri", layout="wide")
 st.title("📚 Dashboard Vendite Libri")
 
-# Stile personalizzato per migliorare l'aspetto (sfondo chiaro, font moderni)
+# Stile personalizzato
 st.markdown("""
 <style>
     [data-testid="stAppViewContainer"] {
@@ -27,100 +26,11 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# Sezione: Definizione della cartella dati
-# Mantengo l'idea di una cartella 'data' con file XLSX
 DATA_DIR = "data"
 
-# Sezione: Funzione per normalizzare titoli (per congiungere varianti come "L' avversario" e "L'avversario")
-def normalize_title(title):
-    if isinstance(title, str):
-        stripped = title.strip()
-        lower_stripped = stripped.lower()
-        if lower_stripped in ["l' avversario", "l'avversario"]:
-            return "L'avversario"
-        return stripped  # Ritorna originale stripped, non lower
-    return title
-
-# Sezione: Funzione per caricare i dati da un file XLSX
-# Questa funzione legge un singolo file XLSX, standardizza le colonne, filtra righe valide e converte tipi numerici
-@st.cache_data
-def load_data(file_path):
-    try:
-        df = pd.read_excel(file_path, sheet_name="Export", header=0, engine="openpyxl")  # Legge XLSX
-        df.columns = [str(col).strip().lower().replace(" ", "_") for col in df.columns]
-        rank_variants = ["rank", "rango", "classifica"]
-        rank_col = next((col for col in df.columns if col in rank_variants), None)
-        if not rank_col:
-            st.error(f"File {os.path.basename(file_path)} manca colonna 'Rank' o varianti. Colonne trovate: {list(df.columns)}")
-            return None
-        df = df.rename(columns={rank_col: "rank"})
-        df = df[df["rank"].apply(lambda x: pd.notna(x) and isinstance(x, (int, float)))]
-        if df.empty:
-            st.error(f"File {os.path.basename(file_path)} non contiene righe valide per 'Rank'.")
-            return None
-        numeric_cols = ["rank", "units"]
-        for col in numeric_cols:
-            if col in df.columns:
-                df[col] = pd.to_numeric(df[col], errors="coerce")
-        # Normalizza titoli
-        if 'title' in df.columns:
-            df['title'] = df['title'].apply(normalize_title)
-        return df
-    except Exception as e:
-        st.error(f"Errore nel caricamento di {os.path.basename(file_path)}: {e}")
-        return None
-
-# Sezione: Funzione per filtrare i dati
-# Applica filtri basati su un dizionario di filtri; gestisce aggregati ignorando 'rank' se necessario
-def filter_data(df, filters, is_aggregate=False):
-    if df is None:
-        return None
-    filtered_df = df.copy()
-    for col, value in filters.items():
-        if value and value != "Tutti":
-            if isinstance(value, list):
-                filtered_df = filtered_df[filtered_df[col].isin(value)]
-            else:
-                if col == "rank" and is_aggregate:
-                    continue
-                if col == "rank":
-                    filtered_df = filtered_df[filtered_df[col] == float(value)]
-                else:
-                    filtered_df = filtered_df[filtered_df[col] == value]
-    return filtered_df
-
-# Sezione: Funzione per aggregare dati per gruppo (autore, editore, titolo)
-# Calcola totali unità vendute e numero di items unici
-def aggregate_group_data(df, group_by, values):
-    if df is None or not values:
-        return None
-    group_df = df[df[group_by].isin(values)] if isinstance(values, list) else df[df[group_by] == values]
-    if group_df.empty:
-        return None
-    return {
-        "Total Units": group_df["units"].sum(),
-        "Items": len(group_df["title"].unique()) if group_by != "title" else len(values) if isinstance(values, list) else 1
-    }
-
-# Sezione: Funzione per aggregare tutte le settimane
-# Concatena tutti i DataFrame e somma 'units' per combinazioni uniche di publisher, author, title
-def aggregate_all_weeks(dataframes):
-    all_dfs = []
-    for week, df in dataframes.items():
-        if df is not None:
-            all_dfs.append(df)
-    if not all_dfs:
-        return None
-    combined_df = pd.concat(all_dfs, ignore_index=True)
-    # Normalizza titoli nel combined_df
-    if 'title' in combined_df.columns:
-        combined_df['title'] = combined_df['title'].apply(normalize_title)
-    agg_df = combined_df.groupby(["publisher", "author", "title"], as_index=False)["units"].sum()
-    return agg_df
-
-# Sezione: Caricamento dei file XLSX dalla cartella 'data'
-# Cerca file con pattern 'Classifica week*.xlsx', ordina per numero settimana
+# Caricamento parallelo dei file XLSX
 dataframes = {}
+all_publishers = set()
 if not os.path.exists(DATA_DIR):
     st.error(f"Cartella {DATA_DIR} non trovata.")
 else:
@@ -132,32 +42,29 @@ else:
             valid_files.append((file_path, int(match.group(1))))
         else:
             st.warning(f"Nome file non valido: {os.path.basename(file_path)}")
-    for file_path, week_num in sorted(valid_files, key=lambda x: x[1]):
-        df = load_data(file_path)
+    valid_files = sorted(valid_files, key=lambda x: x[1])
+
+    # Caricamento parallelo
+    with ThreadPoolExecutor() as executor:
+        dfs = list(executor.map(load_data, [fp for fp, _ in valid_files]))
+    for (file_path, week_num), df in zip(valid_files, dfs):
         if df is not None:
             dataframes[f"Settimana {week_num}"] = df
-
-# Collect all unique publishers for the selectbox in tab3
-all_publishers = set()
-for df in dataframes.values():
-    if df is not None and 'publisher' in df.columns:
-        all_publishers.update(df['publisher'].dropna().unique())
+            if 'publisher' in df.columns:
+                all_publishers.update(df['publisher'].dropna().unique())
 publisher_options = sorted(list(all_publishers))
 
-# Sezione: Logica principale della dashboard
+# Logica principale
 if dataframes:
-    # Crea schede (tabs) come richiesto: una principale con filtri, una per analisi Adelphi (rimossa "Comparazioni")
     tab1, tab3 = st.tabs(["Principale", "Analisi Editore"])
 
-    # Sezione: Scheda Principale - Gestisce selezione settimana, filtri in italiano, dati e statistiche
     with tab1:
         week_options = ["Tutti"] + sorted(dataframes.keys(), key=lambda x: int(re.search(r'Settimana\s*(\d+)', x, re.IGNORECASE).group(1)))
-        # Sincronizza con query_params
         query_params = st.query_params.to_dict()
         initial_week = query_params.get('selected_week', ["Tutti"])[0]
         if initial_week not in week_options:
             initial_week = "Tutti"
-        selected_week = st.sidebar.selectbox("Seleziona la Settimana", week_options, index=week_options.index(initial_week))  # Filtro in italiano
+        selected_week = st.sidebar.selectbox("Seleziona la Settimana", week_options, index=week_options.index(initial_week))
         st.query_params['selected_week'] = selected_week
         
         is_aggregate = selected_week == "Tutti"
@@ -167,10 +74,10 @@ if dataframes:
             df = dataframes[selected_week]
 
         if df is not None:
-            st.sidebar.header("Filtri")  # Header in italiano
+            st.sidebar.header("Filtri")
             filters = {}
             filter_cols = ["rank", "publisher", "author", "title"]
-            filter_labels = {"rank": "Classifica", "publisher": "Editore", "author": "Autore", "title": "Titolo"}  # Etichette in italiano
+            filter_labels = {"rank": "Classifica", "publisher": "Editore", "author": "Autore", "title": "Titolo"}
             for col in filter_cols:
                 if col in df.columns:
                     unique_values = sorted(df[col].dropna().unique())
@@ -183,7 +90,6 @@ if dataframes:
                         filters[col] = st.sidebar.multiselect(filter_labels[col], unique_values, default=initial_value)
                         st.query_params[col] = filters[col]
 
-            # Aggiunto: Bottone per reimpostare filtri
             if st.sidebar.button("Reimposta Filtri"):
                 st.query_params.clear()
                 st.rerun()
@@ -198,7 +104,6 @@ if dataframes:
                     csv = filtered_df.to_csv(index=False).encode('utf-8')
                     st.download_button("Scarica CSV", data=csv, file_name="dati_filtrati.csv", mime="text/csv")
 
-                # Statistiche aggregate per gruppi selezionati
                 for group_by in ["author", "publisher", "title"]:
                     selected_values = filters.get(group_by, [])
                     if selected_values:
@@ -209,55 +114,32 @@ if dataframes:
                             col1.metric("Unità Vendute", stats["Total Units"])
                             col2.metric(f"Numero di { 'Libri' if group_by in ['author', 'publisher'] else 'Elementi' }", stats["Items"])
 
-                # Sezione: Analisi Grafica nella scheda principale (usando Altair per grafiche più belle)
                 st.header("Analisi Grafica")
                 try:
-                    # Top 20 Libri - Mostra solo se più di un valore
-                    top_books = filtered_df.nlargest(20, "units")[["title", "units"]]
-                    if len(top_books) > 1:
+                    top_books_chart = create_top_books_chart(filtered_df)
+                    if top_books_chart:
                         st.subheader("Top 20 Libri")
-                        chart1 = alt.Chart(top_books).mark_bar(color='#4c78a8').encode(
-                            x=alt.X('title:N', sort='-y', title='Titolo'),
-                            y=alt.Y('units:Q', title='Unità Vendute'),
-                            tooltip=['title', 'units']
-                        ).properties(width='container').interactive()
-                        st.altair_chart(chart1, use_container_width=True)
+                        st.altair_chart(top_books_chart, use_container_width=True)
 
-                    # Top 10 Autori - Mostra solo se più di un valore
-                    author_units = filtered_df.groupby("author")["units"].sum()
-                    author_units = author_units[author_units.index != 'AA.VV.']  # Escludi "AA.VV." (con punto)
-                    top_authors = author_units.nlargest(10).reset_index()
-                    if len(top_authors) > 1:
+                    top_authors_chart = create_top_authors_chart(filtered_df)
+                    if top_authors_chart:
                         st.subheader("Top 10 Autori")
-                        chart2 = alt.Chart(top_authors).mark_bar(color='#54a24b').encode(
-                            x=alt.X('author:N', sort='-y', title='Autore'),
-                            y=alt.Y('units:Q', title='Unità Vendute'),
-                            tooltip=['author', 'units']
-                        ).properties(width='container').interactive()
-                        st.altair_chart(chart2, use_container_width=True)
+                        st.altair_chart(top_authors_chart, use_container_width=True)
 
-                    # Top 10 Editori - Mostra solo se più di un valore
-                    top_publishers = filtered_df.groupby("publisher")["units"].sum().nlargest(10).reset_index()
-                    if len(top_publishers) > 1:
+                    top_publishers_chart = create_top_publishers_chart(filtered_df)
+                    if top_publishers_chart:
                         st.subheader("Top 10 Editori")
-                        chart3 = alt.Chart(top_publishers).mark_bar(color='#e45756').encode(
-                            x=alt.X('publisher:N', sort='-y', title='Editore'),
-                            y=alt.Y('units:Q', title='Unità Vendute'),
-                            tooltip=['publisher', 'units']
-                        ).properties(width='container').interactive()
-                        st.altair_chart(chart3, use_container_width=True)
+                        st.altair_chart(top_publishers_chart, use_container_width=True)
                 except Exception as e:
                     st.error(f"Errore nei grafici: {e}")
 
-                # Sezione: Grafico Andamento Settimanale (solo se settimana == "Tutti" e selezione di titolo, autore o editore)
                 if is_aggregate:
                     selected_title = filters.get('title', [])
                     selected_author = filters.get('author', [])
                     selected_publisher = filters.get('publisher', [])
                     if selected_title or selected_author or selected_publisher:
                         st.header("Andamento Settimanale")
-                        trend_data_books = []  # Per libri singoli (se autore)
-                        trend_data_sum = []    # Per somma (autore, editore, titolo)
+                        trend_data_sum, trend_data_books = [], []
                         for week, week_df in sorted(dataframes.items(), key=lambda x: int(re.search(r'Settimana\s*(\d+)', x[0], re.IGNORECASE).group(1))):
                             week_num = int(re.search(r'Settimana\s*(\d+)', week, re.IGNORECASE).group(1))
                             if week_df is not None:
@@ -265,108 +147,63 @@ if dataframes:
                                 if selected_title:
                                     week_filtered = week_filtered[week_filtered['title'].isin(selected_title)]
                                     group_by = 'title'
-                                    selected_items = selected_title
                                     selected_items_sum = selected_title
                                 elif selected_publisher:
                                     week_filtered = week_filtered[week_filtered['publisher'].isin(selected_publisher)]
                                     group_by = 'publisher'
-                                    selected_items = selected_publisher
                                     selected_items_sum = selected_publisher
                                 elif selected_author:
                                     week_filtered = week_filtered[week_filtered['author'].isin(selected_author)]
-                                    group_by = 'title'  # Per autori, aggrega per titolo per linee multiple
-                                    selected_items_books = week_filtered['title'].unique().tolist()  # Tutti i libri dell'autore
-                                    selected_items_sum = selected_author  # Per somma per autore
+                                    group_by = 'title'
+                                    selected_items_books = week_filtered['title'].unique().tolist()
+                                    selected_items_sum = selected_author
 
                                 if not week_filtered.empty:
-                                    # Per somma (per titolo, editore, o autore)
                                     for item in selected_items_sum:
                                         item_df = week_filtered[week_filtered['author' if selected_author else group_by] == item] if selected_author else week_filtered[week_filtered[group_by] == item]
                                         if not item_df.empty:
                                             trend_data_sum.append({"Settimana": week, "Unità Vendute": item_df["units"].sum(), "Item": item, "Week_Num": week_num})
 
-                                    # Per libri singoli (solo per autore)
-                                    if selected_author and selected_items_books:
+                                    if selected_author and 'selected_items_books' in locals():
                                         for item in selected_items_books:
                                             item_df = week_filtered[week_filtered[group_by] == item]
                                             if not item_df.empty:
                                                 trend_data_books.append({"Settimana": week, "Unità Vendute": item_df["units"].sum(), "Item": item, "Week_Num": week_num})
 
-                        # Grafico per somma
                         if trend_data_sum:
                             trend_df_sum = pd.DataFrame(trend_data_sum)
                             trend_df_sum.sort_values('Week_Num', inplace=True)
-                            if selected_title:
-                                subheader_sum = "Andamento per Titolo"
-                            elif selected_author:
-                                subheader_sum = "Andamento per Autore (Somma)"
-                            elif selected_publisher:
-                                subheader_sum = "Andamento per Editore (Somma)"
+                            subheader_sum = "Andamento per " + ("Titolo" if selected_title else "Editore (Somma)" if selected_publisher else "Autore (Somma)")
                             st.subheader(subheader_sum)
-                            chart_sum = alt.Chart(trend_df_sum).mark_line(point=True).encode(
-                                x=alt.X('Settimana:N', sort=alt.EncodingSortField(field='Week_Num', order='ascending'), title='Settimana'),
-                                y=alt.Y('Unità Vendute:Q', title='Unità Vendute'),
-                                color=alt.Color('Item:N', legend=alt.Legend(title="Item")),
-                                tooltip=['Settimana', 'Unità Vendute', 'Item']
-                            ).properties(width='container').interactive()
+                            chart_sum = create_trend_chart(trend_df_sum, 'Item')
                             st.altair_chart(chart_sum, use_container_width=True)
                             st.dataframe(trend_df_sum)
 
-                        # Grafico per libri singoli (solo per autore)
                         if selected_author and trend_data_books:
                             trend_df_books = pd.DataFrame(trend_data_books)
                             trend_df_books.sort_values('Week_Num', inplace=True)
                             st.subheader("Andamento per Libri dell'Autore")
-                            chart_books = alt.Chart(trend_df_books).mark_line(point=True).encode(
-                                x=alt.X('Settimana:N', sort=alt.EncodingSortField(field='Week_Num', order='ascending'), title='Settimana'),
-                                y=alt.Y('Unità Vendute:Q', title='Unità Vendute'),
-                                color=alt.Color('Item:N', legend=alt.Legend(title="Libro")),
-                                tooltip=['Settimana', 'Unità Vendute', 'Item']
-                            ).properties(width='container').interactive()
+                            chart_books = create_trend_chart(trend_df_books, 'Libro')
                             st.altair_chart(chart_books, use_container_width=True)
                             st.dataframe(trend_df_books)
 
-                        # Grafico aggiuntivo: Andamento settimanale dei primi 20 libri di un singolo editore
-                        if len(selected_publisher) == 1 and is_aggregate:
-                            trend_data_publisher_books = []
-                            # Trova i primi 20 libri dell'editore per vendite totali
-                            publisher_books = aggregate_all_weeks(dataframes)
-                            publisher_books = publisher_books[publisher_books['publisher'].isin(selected_publisher)]
-                            top_20_titles = publisher_books.nlargest(20, 'units')['title'].tolist()
-                            for week, week_df in sorted(dataframes.items(), key=lambda x: int(re.search(r'Settimana\s*(\d+)', x[0], re.IGNORECASE).group(1))):
-                                week_num = int(re.search(r'Settimana\s*(\d+)', week, re.IGNORECASE).group(1))
-                                if week_df is not None:
-                                    week_filtered = week_df[week_df['publisher'].isin(selected_publisher)]
-                                    if not week_filtered.empty:
-                                        for title in top_20_titles:
-                                            title_df = week_filtered[week_filtered['title'] == title]
-                                            if not title_df.empty:
-                                                trend_data_publisher_books.append({"Settimana": week, "Unità Vendute": title_df["units"].sum(), "Libro": title, "Week_Num": week_num})
-                            if trend_data_publisher_books:
-                                trend_df_publisher_books = pd.DataFrame(trend_data_publisher_books)
-                                trend_df_publisher_books.sort_values('Week_Num', inplace=True)
+                        if len(selected_publisher) == 1:
+                            trend_df_publisher_books = create_publisher_books_trend_chart(dataframes, selected_publisher)
+                            if trend_df_publisher_books is not None:
                                 st.subheader(f"Andamento Settimanale dei Primi 20 Libri dell'Editore")
-                                chart_publisher_books = alt.Chart(trend_df_publisher_books).mark_line(point=True).encode(
-                                    x=alt.X('Settimana:N', sort=alt.EncodingSortField(field='Week_Num', order='ascending'), title='Settimana'),
-                                    y=alt.Y('Unità Vendute:Q', title='Unità Vendute'),
-                                    color=alt.Color('Libro:N', legend=alt.Legend(title="Libro")),
-                                    tooltip=['Settimana', 'Unità Vendute', 'Libro']
-                                ).properties(width='container').interactive()
+                                chart_publisher_books = create_trend_chart(trend_df_publisher_books, 'Libro')
                                 st.altair_chart(chart_publisher_books, use_container_width=True)
                                 st.dataframe(trend_df_publisher_books)
 
-    # Sezione: Scheda Analisi Editore - Analisi variazioni settimanali per un editore selezionato
     with tab3:
         st.header("Analisi Variazioni Settimanali per Editore")
-        
-        # Seleziona editore
         selected_publisher = st.selectbox(
             "Seleziona Editore",
             publisher_options,
             index=publisher_options.index('Adelphi') if 'Adelphi' in publisher_options else 0
         )
-        
-        # Raccolgo i dati per l'editore selezionato
+
+        publisher_df = None
         publisher_data = []
         for week, week_df in sorted(dataframes.items(), key=lambda x: int(re.search(r'Settimana\s*(\d+)', x[0], re.IGNORECASE).group(1))):
             week_num = int(re.search(r'Settimana\s*(\d+)', week, re.IGNORECASE).group(1))
@@ -377,72 +214,46 @@ if dataframes:
                     pub_df['Settimana'] = week
                     pub_df['Week_Num'] = week_num
                     publisher_data.append(pub_df)
-        
+
         if publisher_data:
-            # Concatena e aggrega per titolo, autore e settimana (somma units)
             publisher_df = pd.concat(publisher_data, ignore_index=True)
             publisher_df['title'] = publisher_df['title'].apply(normalize_title)
             publisher_df = publisher_df.groupby(['title', 'author', 'Settimana', 'Week_Num'])['units'].sum().reset_index()
-            
-            # Applica filtri globali (titolo, autore)
+
             if filters.get('title', []):
                 publisher_df = publisher_df[publisher_df['title'].isin(filters['title'])]
             if filters.get('author', []):
                 publisher_df = publisher_df[publisher_df['author'].isin(filters['author'])]
-            
-            # Crea colonna combinata per pivot e groupby per gestire potenziali duplicati titolo
+
             publisher_df['title_author'] = publisher_df['title'] + ' (' + publisher_df['author'] + ')'
-            
-            # Verifica settimane consecutive
+
             week_nums = sorted(publisher_df['Week_Num'].unique())
             if len(week_nums) > 1 and not all(week_nums[i] + 1 == week_nums[i + 1] for i in range(len(week_nums) - 1)):
                 st.warning(f"Dati settimanali non consecutivi per {selected_publisher}: i calcoli delle variazioni potrebbero essere imprecisi.")
-            
-            # Calcola variazioni percentuali
+
             publisher_df.sort_values(['title_author', 'Week_Num'], inplace=True)
             publisher_df['Previous_Units'] = publisher_df.groupby('title_author')['units'].shift(1)
             publisher_df['Diff_pct'] = np.where(
                 publisher_df['Previous_Units'] > 0,
                 (publisher_df['units'] - publisher_df['Previous_Units']) / publisher_df['Previous_Units'] * 100,
-                np.nan  # Usa np.nan per la prima settimana invece di 0
+                np.nan
             )
-            
-            # Verifica duplicati prima del pivot
+
             duplicates = publisher_df.duplicated(subset=['title_author', 'Settimana'], keep=False)
             if duplicates.any():
                 st.error(f"Trovati dati duplicati per {selected_publisher}. Elementi con duplicati: {publisher_df[duplicates]['title_author'].unique().tolist()}")
                 st.dataframe(publisher_df[duplicates])
                 st.stop()
-            
-            # Pivot per heatmap
+
             try:
-                pivot_diff_pct = publisher_df.pivot(index='title_author', columns='Settimana', values='Diff_pct')
-                pivot_units = publisher_df.pivot(index='title_author', columns='Settimana', values='units')
-                # Ordina titoli per vendite totali
-                total_units_per_title = publisher_df.groupby('title_author')['units'].sum().sort_values(ascending=False).index.tolist()
-                
-                # Formato long per Altair
-                pivot_diff_pct_long = pivot_diff_pct.reset_index().melt(id_vars='title_author', var_name='Settimana', value_name='Diff_pct')
-                pivot_units_long = pivot_units.reset_index().melt(id_vars='title_author', var_name='Settimana', value_name='units')
-                pivot_df = pd.merge(pivot_diff_pct_long, pivot_units_long, on=['title_author', 'Settimana'])
-                pivot_df = pivot_df.merge(publisher_df[['Settimana', 'Week_Num']].drop_duplicates(), on='Settimana')
-                
-                # Heatmap
+                heatmap = create_heatmap(publisher_df)
                 st.subheader(f"Heatmap Variazioni Percentuali (%) per {selected_publisher} - Verde: Crescita, Rosso: Calo")
-                heatmap = alt.Chart(pivot_df).mark_rect().encode(
-                    x=alt.X('Settimana:O', sort=alt.EncodingSortField(field='Week_Num', order='ascending'), title='Settimana'),
-                    y=alt.Y('title_author:O', sort=total_units_per_title, title='Titolo (Autore)'),
-                    color=alt.Color('Diff_pct:Q', scale=alt.Scale(scheme='redyellowgreen', domainMid=0), title='Variazione %'),
-                    tooltip=['title_author', 'Settimana', 'units', alt.Tooltip('Diff_pct:Q', format='.2f')]
-                ).properties(width='container').interactive(bind_y=True)
                 st.altair_chart(heatmap, use_container_width=True)
-                
-                # Mostra dataframe raw
                 st.subheader("Dati Raw")
                 st.dataframe(publisher_df[['title', 'author', 'Settimana', 'units', 'Diff_pct']])
             except Exception as e:
                 st.error(f"Errore nella creazione della heatmap: {e}")
-                st.dataframe(publisher_df)  # Mostra dati per debugging
+                st.dataframe(publisher_df)
         else:
             st.info(f"Nessun dato disponibile per l'editore '{selected_publisher}'.")
 else:
