@@ -137,10 +137,17 @@ else:
         if df is not None:
             dataframes[f"Settimana {week_num}"] = df
 
+# Collect all unique publishers for the selectbox in tab3
+all_publishers = set()
+for df in dataframes.values():
+    if df is not None and 'publisher' in df.columns:
+        all_publishers.update(df['publisher'].dropna().unique())
+publisher_options = sorted(list(all_publishers))
+
 # Sezione: Logica principale della dashboard
 if dataframes:
     # Crea schede (tabs) come richiesto: una principale con filtri, una per analisi Adelphi (rimossa "Comparazioni")
-    tab1, tab3 = st.tabs(["Principale", "Analisi Adelphi"])
+    tab1, tab3 = st.tabs(["Principale", "Analisi Editore"])
 
     # Sezione: Scheda Principale - Gestisce selezione settimana, filtri in italiano, dati e statistiche
     with tab1:
@@ -175,6 +182,11 @@ if dataframes:
                     else:
                         filters[col] = st.sidebar.multiselect(filter_labels[col], unique_values, default=initial_value)
                         st.query_params[col] = filters[col]
+
+            # Aggiunto: Bottone per reimpostare filtri
+            if st.sidebar.button("Reimposta Filtri"):
+                st.query_params.clear()
+                st.rerun()
 
             filtered_df = filter_data(df, filters, is_aggregate=is_aggregate)
             if filtered_df is not None and not filtered_df.empty:
@@ -343,91 +355,95 @@ if dataframes:
                                 st.altair_chart(chart_publisher_books, use_container_width=True)
                                 st.dataframe(trend_df_publisher_books)
 
-        # Sezione: Scheda Analisi Editore - Analisi variazioni settimanali per un editore selezionato
-with tab3:
-    st.header("Analisi Variazioni Settimanali per Editore")
-    
-    # Seleziona editore
-    publisher_options = sorted(df['publisher'].dropna().unique()) if 'publisher' in df.columns else ['Adelphi']
-    selected_publisher = st.selectbox(
-        "Seleziona Editore",
-        publisher_options,
-        index=publisher_options.index('Adelphi') if 'Adelphi' in publisher_options else 0
-    )
-    
-    # Raccolgo i dati per l'editore selezionato
-    publisher_data = []
-    for week, week_df in sorted(dataframes.items(), key=lambda x: int(re.search(r'Settimana\s*(\d+)', x[0], re.IGNORECASE).group(1))):
-        week_num = int(re.search(r'Settimana\s*(\d+)', week, re.IGNORECASE).group(1))
-        if week_df is not None:
-            pub_df = week_df[week_df['publisher'].str.contains(selected_publisher, case=False, na=False)]
-            if not pub_df.empty:
-                pub_df = pub_df[['title', 'author', 'units']].copy()
-                pub_df['Settimana'] = week
-                pub_df['Week_Num'] = week_num
-                publisher_data.append(pub_df)
-    
-    if publisher_data:
-        # Concatena e aggrega per titolo e settimana (somma units, ignora author per evitare duplicati nel pivot)
-        publisher_df = pd.concat(publisher_data, ignore_index=True)
-        publisher_df['title'] = publisher_df['title'].apply(normalize_title)
-        publisher_df = publisher_df.groupby(['title', 'Settimana', 'Week_Num'])['units'].sum().reset_index()
+    # Sezione: Scheda Analisi Editore - Analisi variazioni settimanali per un editore selezionato
+    with tab3:
+        st.header("Analisi Variazioni Settimanali per Editore")
         
-        # Applica filtri globali (titolo)
-        if filters.get('title', []):
-            publisher_df = publisher_df[publisher_df['title'].isin(filters['title'])]
-        
-        # Verifica settimane consecutive
-        week_nums = sorted(publisher_df['Week_Num'].unique())
-        if len(week_nums) > 1 and not all(week_nums[i] + 1 == week_nums[i + 1] for i in range(len(week_nums) - 1)):
-            st.warning(f"Dati settimanali non consecutivi per {selected_publisher}: i calcoli delle variazioni potrebbero essere imprecisi.")
-        
-        # Calcola variazioni percentuali
-        publisher_df.sort_values(['title', 'Week_Num'], inplace=True)
-        publisher_df['Previous_Units'] = publisher_df.groupby('title')['units'].shift(1)
-        publisher_df['Diff_pct'] = np.where(
-            publisher_df['Previous_Units'] > 0,
-            (publisher_df['units'] - publisher_df['Previous_Units']) / publisher_df['Previous_Units'] * 100,
-            np.nan  # Usa np.nan per la prima settimana invece di 0
+        # Seleziona editore
+        selected_publisher = st.selectbox(
+            "Seleziona Editore",
+            publisher_options,
+            index=publisher_options.index('Adelphi') if 'Adelphi' in publisher_options else 0
         )
         
-        # Verifica duplicati prima del pivot
-        duplicates = publisher_df.duplicated(subset=['title', 'Settimana'], keep=False)
-        if duplicates.any():
-            st.error(f"Trovati dati duplicati per {selected_publisher}. Titoli con duplicati: {publisher_df[duplicates]['title'].unique().tolist()}")
-            st.dataframe(publisher_df[duplicates])
-            st.stop()
+        # Raccolgo i dati per l'editore selezionato
+        publisher_data = []
+        for week, week_df in sorted(dataframes.items(), key=lambda x: int(re.search(r'Settimana\s*(\d+)', x[0], re.IGNORECASE).group(1))):
+            week_num = int(re.search(r'Settimana\s*(\d+)', week, re.IGNORECASE).group(1))
+            if week_df is not None:
+                pub_df = week_df[week_df['publisher'].str.contains(selected_publisher, case=False, na=False)]
+                if not pub_df.empty:
+                    pub_df = pub_df[['title', 'author', 'units']].copy()
+                    pub_df['Settimana'] = week
+                    pub_df['Week_Num'] = week_num
+                    publisher_data.append(pub_df)
         
-        # Pivot per heatmap
-        try:
-            pivot_diff_pct = publisher_df.pivot(index='title', columns='Settimana', values='Diff_pct')
-            pivot_units = publisher_df.pivot(index='title', columns='Settimana', values='units')
-            # Ordina titoli per vendite totali
-            total_units_per_title = publisher_df.groupby('title')['units'].sum().sort_values(ascending=False).index.tolist()
+        if publisher_data:
+            # Concatena e aggrega per titolo, autore e settimana (somma units)
+            publisher_df = pd.concat(publisher_data, ignore_index=True)
+            publisher_df['title'] = publisher_df['title'].apply(normalize_title)
+            publisher_df = publisher_df.groupby(['title', 'author', 'Settimana', 'Week_Num'])['units'].sum().reset_index()
             
-            # Formato long per Altair
-            pivot_diff_pct_long = pivot_diff_pct.reset_index().melt(id_vars='title', var_name='Settimana', value_name='Diff_pct')
-            pivot_units_long = pivot_units.reset_index().melt(id_vars='title', var_name='Settimana', value_name='units')
-            pivot_df = pd.merge(pivot_diff_pct_long, pivot_units_long, on=['title', 'Settimana'])
-            pivot_df = pivot_df.merge(publisher_df[['Settimana', 'Week_Num']].drop_duplicates(), on='Settimana')
+            # Applica filtri globali (titolo, autore)
+            if filters.get('title', []):
+                publisher_df = publisher_df[publisher_df['title'].isin(filters['title'])]
+            if filters.get('author', []):
+                publisher_df = publisher_df[publisher_df['author'].isin(filters['author'])]
             
-            # Heatmap
-            st.subheader(f"Heatmap Variazioni Percentuali (%) per {selected_publisher} - Verde: Crescita, Rosso: Calo")
-            heatmap = alt.Chart(pivot_df).mark_rect().encode(
-                x=alt.X('Settimana:O', sort=alt.EncodingSortField(field='Week_Num', order='ascending'), title='Settimana'),
-                y=alt.Y('title:O', sort=total_units_per_title, title='Titolo'),
-                color=alt.Color('Diff_pct:Q', scale=alt.Scale(scheme='redyellowgreen', domainMid=0), title='Variazione %'),
-                tooltip=['title', 'Settimana', 'units', alt.Tooltip('Diff_pct:Q', format='.2f')]
-            ).properties(width='container').interactive(bind_y=True)
-            st.altair_chart(heatmap, use_container_width=True)
+            # Crea colonna combinata per pivot e groupby per gestire potenziali duplicati titolo
+            publisher_df['title_author'] = publisher_df['title'] + ' (' + publisher_df['author'] + ')'
             
-            # Mostra dataframe raw
-            st.subheader("Dati Raw")
-            st.dataframe(publisher_df[['title', 'Settimana', 'units', 'Diff_pct']])
-        except Exception as e:
-            st.error(f"Errore nella creazione della heatmap: {e}")
-            st.dataframe(publisher_df)  # Mostra dati per debugging
-    else:
-        st.info(f"Nessun dato disponibile per l'editore '{selected_publisher}'.") 
+            # Verifica settimane consecutive
+            week_nums = sorted(publisher_df['Week_Num'].unique())
+            if len(week_nums) > 1 and not all(week_nums[i] + 1 == week_nums[i + 1] for i in range(len(week_nums) - 1)):
+                st.warning(f"Dati settimanali non consecutivi per {selected_publisher}: i calcoli delle variazioni potrebbero essere imprecisi.")
+            
+            # Calcola variazioni percentuali
+            publisher_df.sort_values(['title_author', 'Week_Num'], inplace=True)
+            publisher_df['Previous_Units'] = publisher_df.groupby('title_author')['units'].shift(1)
+            publisher_df['Diff_pct'] = np.where(
+                publisher_df['Previous_Units'] > 0,
+                (publisher_df['units'] - publisher_df['Previous_Units']) / publisher_df['Previous_Units'] * 100,
+                np.nan  # Usa np.nan per la prima settimana invece di 0
+            )
+            
+            # Verifica duplicati prima del pivot
+            duplicates = publisher_df.duplicated(subset=['title_author', 'Settimana'], keep=False)
+            if duplicates.any():
+                st.error(f"Trovati dati duplicati per {selected_publisher}. Elementi con duplicati: {publisher_df[duplicates]['title_author'].unique().tolist()}")
+                st.dataframe(publisher_df[duplicates])
+                st.stop()
+            
+            # Pivot per heatmap
+            try:
+                pivot_diff_pct = publisher_df.pivot(index='title_author', columns='Settimana', values='Diff_pct')
+                pivot_units = publisher_df.pivot(index='title_author', columns='Settimana', values='units')
+                # Ordina titoli per vendite totali
+                total_units_per_title = publisher_df.groupby('title_author')['units'].sum().sort_values(ascending=False).index.tolist()
+                
+                # Formato long per Altair
+                pivot_diff_pct_long = pivot_diff_pct.reset_index().melt(id_vars='title_author', var_name='Settimana', value_name='Diff_pct')
+                pivot_units_long = pivot_units.reset_index().melt(id_vars='title_author', var_name='Settimana', value_name='units')
+                pivot_df = pd.merge(pivot_diff_pct_long, pivot_units_long, on=['title_author', 'Settimana'])
+                pivot_df = pivot_df.merge(publisher_df[['Settimana', 'Week_Num']].drop_duplicates(), on='Settimana')
+                
+                # Heatmap
+                st.subheader(f"Heatmap Variazioni Percentuali (%) per {selected_publisher} - Verde: Crescita, Rosso: Calo")
+                heatmap = alt.Chart(pivot_df).mark_rect().encode(
+                    x=alt.X('Settimana:O', sort=alt.EncodingSortField(field='Week_Num', order='ascending'), title='Settimana'),
+                    y=alt.Y('title_author:O', sort=total_units_per_title, title='Titolo (Autore)'),
+                    color=alt.Color('Diff_pct:Q', scale=alt.Scale(scheme='redyellowgreen', domainMid=0), title='Variazione %'),
+                    tooltip=['title_author', 'Settimana', 'units', alt.Tooltip('Diff_pct:Q', format='.2f')]
+                ).properties(width='container').interactive(bind_y=True)
+                st.altair_chart(heatmap, use_container_width=True)
+                
+                # Mostra dataframe raw
+                st.subheader("Dati Raw")
+                st.dataframe(publisher_df[['title', 'author', 'Settimana', 'units', 'Diff_pct']])
+            except Exception as e:
+                st.error(f"Errore nella creazione della heatmap: {e}")
+                st.dataframe(publisher_df)  # Mostra dati per debugging
+        else:
+            st.info(f"Nessun dato disponibile per l'editore '{selected_publisher}'.")
 else:
     st.info("Nessun file XLSX valido in data/.")
