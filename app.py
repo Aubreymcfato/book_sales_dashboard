@@ -1,13 +1,13 @@
 import streamlit as st
 import pandas as pd
+import altair as alt
+import io
+import numpy as np
 import re
-import os
-import glob
-from concurrent.futures import ThreadPoolExecutor
-from data_utils import normalize_title, load_data, filter_data, aggregate_group_data, aggregate_all_weeks
+from data_utils import load_all_dataframes, filter_data, aggregate_group_data, aggregate_all_weeks, normalize_title
 from viz_utils import create_top_books_chart, create_top_authors_chart, create_top_publishers_chart, create_trend_chart, create_publisher_books_trend_chart, create_heatmap
 
-# Configurazione iniziale della pagina Streamlit
+# Configurazione iniziale
 st.set_page_config(page_title="Dashboard Vendite Libri", layout="wide")
 st.title("📚 Dashboard Vendite Libri")
 
@@ -28,35 +28,11 @@ st.markdown("""
 
 DATA_DIR = "data"
 
-# Caricamento parallelo dei file XLSX
-dataframes = {}
-all_publishers = set()
-if not os.path.exists(DATA_DIR):
-    st.error(f"Cartella {DATA_DIR} non trovata.")
-else:
-    xlsx_files = glob.glob(os.path.join(DATA_DIR, "Classifica week*.xlsx"))
-    valid_files = []
-    for file_path in xlsx_files:
-        match = re.search(r'week\s*(\d+)', os.path.basename(file_path), re.IGNORECASE)
-        if match:
-            valid_files.append((file_path, int(match.group(1))))
-        else:
-            st.warning(f"Nome file non valido: {os.path.basename(file_path)}")
-    valid_files = sorted(valid_files, key=lambda x: x[1])
+# Caricamento dati
+dataframes = load_all_dataframes(DATA_DIR)
 
-    # Caricamento parallelo
-    with ThreadPoolExecutor() as executor:
-        dfs = list(executor.map(load_data, [fp for fp, _ in valid_files]))
-    for (file_path, week_num), df in zip(valid_files, dfs):
-        if df is not None:
-            dataframes[f"Settimana {week_num}"] = df
-            if 'publisher' in df.columns:
-                all_publishers.update(df['publisher'].dropna().unique())
-publisher_options = sorted(list(all_publishers))
-
-# Logica principale
 if dataframes:
-    tab1, tab3 = st.tabs(["Principale", "Analisi Editore"])
+    tab1, tab3 = st.tabs(["Principale", "Analisi Adelphi"])
 
     with tab1:
         week_options = ["Tutti"] + sorted(dataframes.keys(), key=lambda x: int(re.search(r'Settimana\s*(\d+)', x, re.IGNORECASE).group(1)))
@@ -116,20 +92,20 @@ if dataframes:
 
                 st.header("Analisi Grafica")
                 try:
-                    top_books_chart = create_top_books_chart(filtered_df)
-                    if top_books_chart:
+                    chart1 = create_top_books_chart(filtered_df)
+                    if chart1:
                         st.subheader("Top 20 Libri")
-                        st.altair_chart(top_books_chart, use_container_width=True)
+                        st.altair_chart(chart1, use_container_width=True)
 
-                    top_authors_chart = create_top_authors_chart(filtered_df)
-                    if top_authors_chart:
+                    chart2 = create_top_authors_chart(filtered_df)
+                    if chart2:
                         st.subheader("Top 10 Autori")
-                        st.altair_chart(top_authors_chart, use_container_width=True)
+                        st.altair_chart(chart2, use_container_width=True)
 
-                    top_publishers_chart = create_top_publishers_chart(filtered_df)
-                    if top_publishers_chart:
+                    chart3 = create_top_publishers_chart(filtered_df)
+                    if chart3:
                         st.subheader("Top 10 Editori")
-                        st.altair_chart(top_publishers_chart, use_container_width=True)
+                        st.altair_chart(chart3, use_container_width=True)
                 except Exception as e:
                     st.error(f"Errore nei grafici: {e}")
 
@@ -139,11 +115,15 @@ if dataframes:
                     selected_publisher = filters.get('publisher', [])
                     if selected_title or selected_author or selected_publisher:
                         st.header("Andamento Settimanale")
-                        trend_data_sum, trend_data_books = [], []
+                        trend_data_sum = []
+                        trend_data_books = []
                         for week, week_df in sorted(dataframes.items(), key=lambda x: int(re.search(r'Settimana\s*(\d+)', x[0], re.IGNORECASE).group(1))):
                             week_num = int(re.search(r'Settimana\s*(\d+)', week, re.IGNORECASE).group(1))
                             if week_df is not None:
                                 week_filtered = week_df.copy()
+                                selected_items_sum = []
+                                selected_items_books = []
+                                group_by = None
                                 if selected_title:
                                     week_filtered = week_filtered[week_filtered['title'].isin(selected_title)]
                                     group_by = 'title'
@@ -164,7 +144,7 @@ if dataframes:
                                         if not item_df.empty:
                                             trend_data_sum.append({"Settimana": week, "Unità Vendute": item_df["units"].sum(), "Item": item, "Week_Num": week_num})
 
-                                    if selected_author and 'selected_items_books' in locals():
+                                    if selected_author and selected_items_books:
                                         for item in selected_items_books:
                                             item_df = week_filtered[week_filtered[group_by] == item]
                                             if not item_df.empty:
@@ -175,7 +155,7 @@ if dataframes:
                             trend_df_sum.sort_values('Week_Num', inplace=True)
                             subheader_sum = "Andamento per " + ("Titolo" if selected_title else "Editore (Somma)" if selected_publisher else "Autore (Somma)")
                             st.subheader(subheader_sum)
-                            chart_sum = create_trend_chart(trend_df_sum, 'Item')
+                            chart_sum = create_trend_chart(trend_df_sum)
                             st.altair_chart(chart_sum, use_container_width=True)
                             st.dataframe(trend_df_sum)
 
@@ -196,65 +176,56 @@ if dataframes:
                                 st.dataframe(trend_df_publisher_books)
 
     with tab3:
-        st.header("Analisi Variazioni Settimanali per Editore")
-        selected_publisher = st.selectbox(
-            "Seleziona Editore",
-            publisher_options,
-            index=publisher_options.index('Adelphi') if 'Adelphi' in publisher_options else 0
-        )
-
-        publisher_df = None
-        publisher_data = []
+        st.header("Analisi Variazioni Settimanali per Adelphi")
+        adelphi_data = []
         for week, week_df in sorted(dataframes.items(), key=lambda x: int(re.search(r'Settimana\s*(\d+)', x[0], re.IGNORECASE).group(1))):
             week_num = int(re.search(r'Settimana\s*(\d+)', week, re.IGNORECASE).group(1))
             if week_df is not None:
-                pub_df = week_df[week_df['publisher'].str.contains(selected_publisher, case=False, na=False)]
-                if not pub_df.empty:
-                    pub_df = pub_df[['title', 'author', 'units']].copy()
-                    pub_df['Settimana'] = week
-                    pub_df['Week_Num'] = week_num
-                    publisher_data.append(pub_df)
-
-        if publisher_data:
-            publisher_df = pd.concat(publisher_data, ignore_index=True)
-            publisher_df['title'] = publisher_df['title'].apply(normalize_title)
-            publisher_df = publisher_df.groupby(['title', 'author', 'Settimana', 'Week_Num'])['units'].sum().reset_index()
-
+                adelphi_df = week_df[week_df['publisher'].str.contains('Adelphi', case=False, na=False)]
+                if not adelphi_df.empty:
+                    adelphi_df = adelphi_df[['title', 'author', 'units']].copy()
+                    adelphi_df['Settimana'] = week
+                    adelphi_df['Week_Num'] = week_num
+                    adelphi_data.append(adelphi_df)
+        
+        if adelphi_data:
+            adelphi_df = pd.concat(adelphi_data, ignore_index=True)
+            adelphi_df['title'] = adelphi_df['title'].apply(normalize_title)
+            adelphi_df = adelphi_df.groupby(['title', 'author', 'Settimana', 'Week_Num'])['units'].sum().reset_index()
             if filters.get('title', []):
-                publisher_df = publisher_df[publisher_df['title'].isin(filters['title'])]
+                adelphi_df = adelphi_df[adelphi_df['title'].isin(filters['title'])]
             if filters.get('author', []):
-                publisher_df = publisher_df[publisher_df['author'].isin(filters['author'])]
-
-            publisher_df['title_author'] = publisher_df['title'] + ' (' + publisher_df['author'] + ')'
-
-            week_nums = sorted(publisher_df['Week_Num'].unique())
-            if len(week_nums) > 1 and not all(week_nums[i] + 1 == week_nums[i + 1] for i in range(len(week_nums) - 1)):
-                st.warning(f"Dati settimanali non consecutivi per {selected_publisher}: i calcoli delle variazioni potrebbero essere imprecisi.")
-
-            publisher_df.sort_values(['title_author', 'Week_Num'], inplace=True)
-            publisher_df['Previous_Units'] = publisher_df.groupby('title_author')['units'].shift(1)
-            publisher_df['Diff_pct'] = np.where(
-                publisher_df['Previous_Units'] > 0,
-                (publisher_df['units'] - publisher_df['Previous_Units']) / publisher_df['Previous_Units'] * 100,
+                adelphi_df = adelphi_df[adelphi_df['author'].isin(filters['author'])]
+            adelphi_df.sort_values(['title', 'Week_Num'], inplace=True)
+            
+            adelphi_df['Previous_Units'] = adelphi_df.groupby('title')['units'].shift(1)
+            adelphi_df['Diff_pct'] = np.where(
+                adelphi_df['Previous_Units'] > 0,
+                (adelphi_df['units'] - adelphi_df['Previous_Units']) / adelphi_df['Previous_Units'] * 100,
                 np.nan
             )
-
-            duplicates = publisher_df.duplicated(subset=['title_author', 'Settimana'], keep=False)
+            
+            duplicates = adelphi_df.duplicated(subset=['title', 'Settimana'], keep=False)
             if duplicates.any():
-                st.error(f"Trovati dati duplicati per {selected_publisher}. Elementi con duplicati: {publisher_df[duplicates]['title_author'].unique().tolist()}")
-                st.dataframe(publisher_df[duplicates])
+                st.error(f"Trovati dati duplicati per Adelphi. Titoli con duplicati: {adelphi_df[duplicates]['title'].unique().tolist()}")
+                st.dataframe(adelphi_df[duplicates])
                 st.stop()
-
-            try:
-                heatmap = create_heatmap(publisher_df)
-                st.subheader(f"Heatmap Variazioni Percentuali (%) per {selected_publisher} - Verde: Crescita, Rosso: Calo")
-                st.altair_chart(heatmap, use_container_width=True)
-                st.subheader("Dati Raw")
-                st.dataframe(publisher_df[['title', 'author', 'Settimana', 'units', 'Diff_pct']])
-            except Exception as e:
-                st.error(f"Errore nella creazione della heatmap: {e}")
-                st.dataframe(publisher_df)
+            
+            total_units_per_title = adelphi_df.groupby('title')['units'].sum().sort_values(ascending=False).index.tolist()
+            
+            pivot_diff_pct = adelphi_df.pivot(index='title', columns='Settimana', values='Diff_pct')
+            pivot_units = adelphi_df.pivot(index='title', columns='Settimana', values='units')
+            pivot_diff_pct_long = pivot_diff_pct.reset_index().melt(id_vars='title', var_name='Settimana', value_name='Diff_pct')
+            pivot_units_long = pivot_units.reset_index().melt(id_vars='title', var_name='Settimana', value_name='units')
+            pivot_df = pd.merge(pivot_diff_pct_long, pivot_units_long, on=['title', 'Settimana'])
+            pivot_df = pivot_df.merge(adelphi_df[['Settimana', 'Week_Num']].drop_duplicates(), on='Settimana')
+            
+            st.subheader("Heatmap Variazioni Percentuali (%) - Verde: Crescita, Rosso: Calo")
+            heatmap = create_heatmap(pivot_df, total_units_per_title)
+            st.altair_chart(heatmap, use_container_width=True)
+            
+            st.dataframe(adelphi_df[['title', 'Settimana', 'units', 'Diff_pct']])
         else:
-            st.info(f"Nessun dato disponibile per l'editore '{selected_publisher}'.")
+            st.info("Nessun dato disponibile per l'editore 'Adelphi'.")
 else:
     st.info("Nessun file XLSX valido in data/.")
