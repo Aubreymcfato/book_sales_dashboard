@@ -428,6 +428,6 @@ with tab3:
             st.error(f"Errore nella creazione della heatmap: {e}")
             st.dataframe(publisher_df)  # Mostra dati per debugging
     else:
-        st.info(f"Nessun dato disponibile per l'editore '{selected_publisher}'.")
+        st.info(f"Nessun dato disponibile per l'editore '{selected_publisher}'.") 
 else:
     st.info("Nessun file XLSX valido in data/.")
