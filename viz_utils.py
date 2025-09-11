@@ -1,5 +1,8 @@
+# viz_utils.py (updated: Changed create_heatmap to use EncodingSortField instead of custom list; removed total_units_per_title param)
 import altair as alt
 import pandas as pd
+import re
+from data_utils import aggregate_all_weeks
 
 def create_top_books_chart(filtered_df):
     top_books = filtered_df.nlargest(20, "units")[["title", "units"]]
@@ -46,7 +49,6 @@ def create_trend_chart(trend_df, legend_title='Item'):
     return chart
 
 def create_publisher_books_trend_chart(dataframes, selected_publisher):
-    from data_utils import aggregate_all_weeks  # Import here to avoid circular imports if needed
     publisher_books = aggregate_all_weeks(dataframes)
     if publisher_books is None:
         return None
@@ -68,10 +70,10 @@ def create_publisher_books_trend_chart(dataframes, selected_publisher):
     trend_df_publisher_books.sort_values('Week_Num', inplace=True)
     return trend_df_publisher_books
 
-def create_heatmap(pivot_df, total_units_per_title):
+def create_heatmap(pivot_df):
     heatmap = alt.Chart(pivot_df).mark_rect().encode(
         x=alt.X('Settimana:O', sort=alt.EncodingSortField(field='Week_Num', order='ascending'), title='Settimana'),
-        y=alt.Y('title:O', sort=total_units_per_title, title='Titolo'),
+        y=alt.Y('title:O', sort=alt.EncodingSortField(field='units', op='sum', order='descending'), title='Titolo'),
         color=alt.Color('Diff_pct:Q', scale=alt.Scale(scheme='redyellowgreen', domainMid=0), title='Variazione %'),
         tooltip=['title', 'Settimana', 'units', alt.Tooltip('Diff_pct:Q', format='.2f')]
     ).properties(width='container').interactive(bind_y=True)
