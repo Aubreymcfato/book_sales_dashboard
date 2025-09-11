@@ -1,3 +1,4 @@
+# app.py (updated: Reverted to Adelphi-only, removed total_units_per_title from heatmap call, added dropna)
 import streamlit as st
 import pandas as pd
 import altair as alt
@@ -190,6 +191,7 @@ if dataframes:
         
         if adelphi_data:
             adelphi_df = pd.concat(adelphi_data, ignore_index=True)
+            adelphi_df = adelphi_df.dropna(subset=['title'])  # Aggiunto per prevenire NaN
             adelphi_df['title'] = adelphi_df['title'].apply(normalize_title)
             adelphi_df = adelphi_df.groupby(['title', 'author', 'Settimana', 'Week_Num'])['units'].sum().reset_index()
             if filters.get('title', []):
@@ -211,8 +213,6 @@ if dataframes:
                 st.dataframe(adelphi_df[duplicates])
                 st.stop()
             
-            total_units_per_title = adelphi_df.groupby('title')['units'].sum().sort_values(ascending=False).index.tolist()
-            
             pivot_diff_pct = adelphi_df.pivot(index='title', columns='Settimana', values='Diff_pct')
             pivot_units = adelphi_df.pivot(index='title', columns='Settimana', values='units')
             pivot_diff_pct_long = pivot_diff_pct.reset_index().melt(id_vars='title', var_name='Settimana', value_name='Diff_pct')
@@ -221,7 +221,7 @@ if dataframes:
             pivot_df = pivot_df.merge(adelphi_df[['Settimana', 'Week_Num']].drop_duplicates(), on='Settimana')
             
             st.subheader("Heatmap Variazioni Percentuali (%) - Verde: Crescita, Rosso: Calo")
-            heatmap = create_heatmap(pivot_df, total_units_per_title)
+            heatmap = create_heatmap(pivot_df)  # Rimossa total_units_per_title
             st.altair_chart(heatmap, use_container_width=True)
             
             st.dataframe(adelphi_df[['title', 'Settimana', 'units', 'Diff_pct']])
