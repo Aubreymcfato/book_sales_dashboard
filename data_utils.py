@@ -1,5 +1,3 @@
-# data_utils.py (updated: Added "collection/series" to collana_variants)
-
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -39,7 +37,7 @@ def load_data(file_path):
         if 'title' in df.columns:
             df['title'] = df['title'].apply(normalize_title)
         # Normalizza colonna "collana"
-        collana_variants = ["collection", "series", "collana", "collection/series"]  # Aggiunto "collection/series"
+        collana_variants = ["collection", "series", "collana", "collection/series"]
         collana_col = next((col for col in df.columns if col in collana_variants), None)
         if collana_col:
             df = df.rename(columns={collana_col: "collana"})
@@ -83,7 +81,7 @@ def aggregate_all_weeks(dataframes):
     combined_df = pd.concat(all_dfs, ignore_index=True)
     if 'title' in combined_df.columns:
         combined_df['title'] = combined_df['title'].apply(normalize_title)
-    agg_df = combined_df.groupby(["publisher", "author", "title", "collana"], as_index=False)["units"].sum()  # Aggiunto "collana" al groupby
+    agg_df = combined_df.groupby(["publisher", "author", "title", "collana"], as_index=False)["units"].sum()
     return agg_df
 
 def load_all_dataframes(data_dir):
@@ -110,3 +108,45 @@ def load_all_dataframes(data_dir):
         if dfs[i] is not None:
             dataframes[f"Settimana {week_nums[i]}"] = dfs[i]
     return dataframes
+
+def apply_advanced_filters(df, conditions, boolean_operator='AND'):
+    if df is None or not conditions:
+        return None
+    filtered_df = df.copy()
+    
+    def apply_condition(df, col, operator, value, negate=False):
+        if col not in df.columns:
+            return df
+        if operator == '==':
+            result = df[col] == value
+        elif operator == '!=':
+            result = df[col] != value
+        elif operator == '>':
+            result = df[col] > float(value)
+        elif operator == '<':
+            result = df[col] < float(value)
+        elif operator == 'contains':
+            result = df[col].str.contains(value, case=False, na=False)
+        elif operator == 'in':
+            result = df[col].isin(value if isinstance(value, list) else [value])
+        elif operator == 'not in':
+            result = ~df[col].isin(value if isinstance(value, list) else [value])
+        return ~result if negate else result
+    
+    combined_mask = None
+    for i, cond in enumerate(conditions):
+        col, op, val, negate = cond['column'], cond['operator'], cond['value'], cond.get('negate', False)
+        mask = apply_condition(filtered_df, col, op, val, negate)
+        
+        if i == 0:
+            combined_mask = mask
+        else:
+            if boolean_operator == 'AND':
+                combined_mask = combined_mask & mask
+            else:  # OR
+                combined_mask = combined_mask | mask
+    
+    if combined_mask is not None:
+        filtered_df = filtered_df[combined_mask]
+    
+    return filtered_df if not filtered_df.empty else None
