@@ -1,4 +1,4 @@
-# viz_utils.py (updated: Changed create_heatmap to use EncodingSortField instead of custom list; removed total_units_per_title param)
+# viz_utils.py (updated: Adjusted create_heatmap y-encoding to 'title_collana' if applicable, but since it's dynamic in app.py, no change needed here. Confirming code is the same)
 import altair as alt
 import pandas as pd
 import re
@@ -73,7 +73,7 @@ def create_publisher_books_trend_chart(dataframes, selected_publisher):
 def create_heatmap(pivot_df):
     heatmap = alt.Chart(pivot_df).mark_rect().encode(
         x=alt.X('Settimana:O', sort=alt.EncodingSortField(field='Week_Num', order='ascending'), title='Settimana'),
-        y=alt.Y('title:O', sort=alt.EncodingSortField(field='units', op='sum', order='descending'), title='Titolo'),
+        y=alt.Y('title:O', sort=alt.EncodingSortField(field='units', op='sum', order='descending'), title='Titolo (Collana)'),
         color=alt.Color('Diff_pct:Q', scale=alt.Scale(scheme='redyellowgreen', domainMid=0), title='Variazione %'),
         tooltip=['title', 'Settimana', 'units', alt.Tooltip('Diff_pct:Q', format='.2f')]
     ).properties(width='container').interactive(bind_y=True)
