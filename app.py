@@ -1,4 +1,4 @@
-# app.py (fixed: Cleaned pivot_df for heatmap, ensured dynamic pivot_index handling)
+# app.py (fixed: Filtered initial_value to prevent invalid defaults in multiselect)
 
 import streamlit as st
 import pandas as pd
@@ -66,7 +66,9 @@ if dataframes:
                         filters[col] = st.sidebar.selectbox(filter_labels[col], ["Tutti"] + [str(val) for val in unique_values], index=0 if initial_value == "Tutti" else unique_values.index(float(initial_value)) + 1)
                         st.query_params[col] = str(filters[col]) if filters[col] != "Tutti" else []
                     else:
-                        filters[col] = st.sidebar.multiselect(filter_labels[col], unique_values, default=initial_value)
+                        # Filter initial_value to only include valid options
+                        valid_initial = [v for v in initial_value if v in unique_values]
+                        filters[col] = st.sidebar.multiselect(filter_labels[col], unique_values, default=valid_initial)
                         st.query_params[col] = filters[col]
 
             if st.sidebar.button("Reimposta Filtri"):
@@ -274,13 +276,13 @@ if dataframes:
             pivot_diff_pct = adelphi_df.pivot(index=pivot_index, columns='Settimana', values='Diff_pct')
             pivot_units = adelphi_df.pivot(index=pivot_index, columns='Settimana', values='units')
             # Clean pivot data
-            pivot_diff_pct = pivot_diff_pct.fillna(0)  # Replace NaN with 0 for heatmap
+            pivot_diff_pct = pivot_diff_pct.fillna(0)
             pivot_units = pivot_units.fillna(0)
             pivot_diff_pct_long = pivot_diff_pct.reset_index().melt(id_vars=pivot_index, var_name='Settimana', value_name='Diff_pct')
             pivot_units_long = pivot_units.reset_index().melt(id_vars=pivot_index, var_name='Settimana', value_name='units')
             pivot_df = pd.merge(pivot_diff_pct_long, pivot_units_long, on=[pivot_index, 'Settimana'])
             pivot_df = pivot_df.merge(adelphi_df[['Settimana', 'Week_Num']].drop_duplicates(), on='Settimana')
-            pivot_df = pivot_df[pivot_df['Diff_pct'].notna()]  # Remove rows with NaN Diff_pct
+            pivot_df = pivot_df[pivot_df['Diff_pct'].notna()]
             
             if not pivot_df.empty:
                 st.subheader("Heatmap Variazioni Percentuali (%) - Verde: Crescita, Rosso: Calo")
