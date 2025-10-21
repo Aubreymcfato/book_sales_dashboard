@@ -4,3 +4,4 @@ altair
 openpyxl
 numpy
 streamlit-extras  # Added for enhanced UI components
+statsmodels
