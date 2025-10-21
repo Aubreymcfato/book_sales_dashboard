@@ -1,4 +1,4 @@
-# app.py (updated: Made 'collana' selection and groupby conditional to avoid KeyError if column is missing)
+# app.py (fixed: Made 'collana' inclusion conditional to avoid KeyError)
 
 import streamlit as st
 import pandas as pd
@@ -274,12 +274,16 @@ if dataframes:
             
             st.dataframe(adelphi_df[['title', 'Settimana', 'units', 'Diff_pct']])
 
-            # Forecasting section (unchanged, but conditional on 'collana' if present)
+            # Previsione Vendite per Collana (Adelphi)
             st.header("Previsione Vendite per Collana (Adelphi)")
-            group_key = 'collana' if 'collana' in adelphi_df.columns else 'publisher'  # Fallback to publisher if no collana
-            collana_groups = adelphi_df.groupby(group_key)
+            if 'collana' in adelphi_df.columns:
+                collana_groups = adelphi_df.groupby('collana')
+            else:
+                collana_groups = {'Tutti': adelphi_df}  # Fallback if no collana
+                st.warning("Colonna 'collana' non trovata. Previsione aggregata per tutti i titoli Adelphi.")
+                collana_groups = [('Tutti', adelphi_df)]
             for collana, group_df in collana_groups:
-                st.subheader(f"{group_key.capitalize()}: {collana}")
+                st.subheader(f"Collana: {collana}")
                 sales_data = group_df.groupby('Week_Num')['units'].sum().reset_index().set_index('Week_Num')
                 if len(sales_data) >= 3:
                     try:
