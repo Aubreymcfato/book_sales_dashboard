@@ -1,4 +1,4 @@
-# app.py (updated: Filtered default values to ensure they exist in unique_values)
+# app.py (updated: Added forecasting section in Principale tab for selected titles)
 
 import streamlit as st
 import pandas as pd
@@ -8,6 +8,7 @@ import numpy as np
 import re
 from data_utils import load_all_dataframes, filter_data, aggregate_group_data, aggregate_all_weeks, normalize_title
 from viz_utils import create_top_books_chart, create_top_authors_chart, create_top_publishers_chart, create_trend_chart, create_publisher_books_trend_chart, create_heatmap
+from statsmodels.tsa.arima.model import ARIMA
 
 # Configurazione iniziale
 st.set_page_config(page_title="Dashboard Vendite Libri", layout="wide")
@@ -62,17 +63,9 @@ if dataframes:
                     initial_value = query_params.get(col, [])
                     if col == "rank":
                         initial_value = initial_value[0] if initial_value else "Tutti"
-                        rank_options = ["Tutti"] + [str(val) for val in unique_values]
-                        default_index = 0
-                        if initial_value != "Tutti":
-                            try:
-                                default_index = rank_options.index(str(float(initial_value)))
-                            except ValueError:
-                                default_index = 0  # Fallback if not found
-                        filters[col] = st.sidebar.selectbox(filter_labels[col], rank_options, index=default_index)
+                        filters[col] = st.sidebar.selectbox(filter_labels[col], ["Tutti"] + [str(val) for val in unique_values], index=0 if initial_value == "Tutti" else unique_values.index(float(initial_value)) + 1)
                         st.query_params[col] = str(filters[col]) if filters[col] != "Tutti" else []
                     else:
-                        # Filter initial_value to only include values present in unique_values
                         valid_initial = [v for v in initial_value if v in unique_values]
                         filters[col] = st.sidebar.multiselect(filter_labels[col], unique_values, default=valid_initial)
                         st.query_params[col] = filters[col]
@@ -225,64 +218,89 @@ if dataframes:
                                 st.altair_chart(chart_publisher_books, use_container_width=True)
                                 st.dataframe(trend_df_publisher_books)
 
-    # Sezione: Scheda Analisi Adelphi - Analisi specifica per l'editore 'Adelphi', con heatmap delle variazioni settimanali
+                        # New section: Predictive Sales Forecasting (only for single title selection)
+                        if len(selected_title) == 1:
+                            st.header("Previsione Vendite")
+                            title = selected_title[0]
+                            sales_data = []
+                            for week, week_df in sorted(dataframes.items(), key=lambda x: int(re.search(r'Settimana\s*(\d+)', x[0], re.IGNORECASE).group(1))):
+                                week_num = int(re.search(r'Settimana\s*(\d+)', week, re.IGNORECASE).group(1))
+                                if week_df is not None:
+                                    title_df = week_df[week_df['title'] == title]
+                                    units = title_df['units'].sum() if not title_df.empty else 0
+                                    sales_data.append({"Week_Num": week_num, "Unità Vendute": units})
+                            if len(sales_data) >= 3:  # Require at least 3 data points for ARIMA
+                                sales_df = pd.DataFrame(sales_data).set_index('Week_Num')
+                                try:
+                                    model = ARIMA(sales_df['Unità Vendute'], order=(1, 1, 1))
+                                    model_fit = model.fit()
+                                    forecast_steps = 4  # Predict next 4 weeks
+                                    forecast = model_fit.forecast(steps=forecast_steps)
+                                    forecast_df = pd.DataFrame({
+                                        'Settimana': [f"Settimana {len(sales_data) + i + 1}" for i in range(forecast_steps)],
+                                        'Previsione Unità Vendute': forecast.round().astype(int)
+                                    })
+                                    st.dataframe(forecast_df)
+                                    # Forecast chart
+                                    forecast_chart = alt.Chart(forecast_df).mark_line(point=True, color='red').encode(
+                                        x='Settimana:N',
+                                        y='Previsione Unità Vendute:Q',
+                                        tooltip=['Settimana', 'Previsione Unità Vendute']
+                                    ).properties(width='container').interactive()
+                                    st.altair_chart(forecast_chart, use_container_width=True)
+                                except Exception as e:
+                                    st.warning(f"Impossibile generare previsione: {e}")
+                            else:
+                                st.warning("Dati insufficienti per la previsione (richiesti almeno 3 settimane).")
+
     with tab3:
         st.header("Analisi Variazioni Settimanali per Adelphi")
-        
-        # Raccolgo i dati solo per publisher == 'Adelphi'
         adelphi_data = []
         for week, week_df in sorted(dataframes.items(), key=lambda x: int(re.search(r'Settimana\s*(\d+)', x[0], re.IGNORECASE).group(1))):
             week_num = int(re.search(r'Settimana\s*(\d+)', week, re.IGNORECASE).group(1))
             if week_df is not None:
-                adelphi_df = week_df[week_df['publisher'].str.contains('Adelphi', case=False, na=False)]  # Filtra per 'Adelphi' (case-insensitive)
+                adelphi_df = week_df[week_df['publisher'].str.contains('Adelphi', case=False, na=False)]
                 if not adelphi_df.empty:
-                    adelphi_df = adelphi_df[['title', 'author', 'units']].copy()  # Aggiunto 'author' per filtraggio
+                    adelphi_df = adelphi_df[['title', 'author', 'units']].copy()
                     adelphi_df['Settimana'] = week
                     adelphi_df['Week_Num'] = week_num
                     adelphi_data.append(adelphi_df)
         
         if adelphi_data:
             adelphi_df = pd.concat(adelphi_data, ignore_index=True)
-            # Aggrega per titolo e settimana per gestire duplicati
+            adelphi_df = adelphi_df.dropna(subset=['title'])
+            adelphi_df['title'] = adelphi_df['title'].apply(normalize_title)
             adelphi_df = adelphi_df.groupby(['title', 'author', 'Settimana', 'Week_Num'])['units'].sum().reset_index()
-            # Applica filtri globali (autore, titolo) alla heatmap
             if filters.get('title', []):
                 adelphi_df = adelphi_df[adelphi_df['title'].isin(filters['title'])]
             if filters.get('author', []):
                 adelphi_df = adelphi_df[adelphi_df['author'].isin(filters['author'])]
             adelphi_df.sort_values(['title', 'Week_Num'], inplace=True)
             
-            # Calcola le differenze percentuali rispetto alla settimana precedente per ogni titolo
             adelphi_df['Previous_Units'] = adelphi_df.groupby('title')['units'].shift(1)
             adelphi_df['Diff_pct'] = np.where(
                 adelphi_df['Previous_Units'] > 0,
                 (adelphi_df['units'] - adelphi_df['Previous_Units']) / adelphi_df['Previous_Units'] * 100,
-                0  # Imposta a 0 per la prima settimana o se previous <= 0
+                np.nan
             )
             
-            # Calcola il totale venduto per titolo per ordinare i titoli da most sold a least sold
-            total_units_per_title = adelphi_df.groupby('title')['units'].sum().sort_values(ascending=False).index.tolist()
+            duplicates = adelphi_df.duplicated(subset=['title', 'Settimana'], keep=False)
+            if duplicates.any():
+                st.error(f"Trovati dati duplicati per Adelphi. Titoli con duplicati: {adelphi_df[duplicates]['title'].unique().tolist()}")
+                st.dataframe(adelphi_df[duplicates])
+                st.stop()
             
-            # Pivot per heatmap: righe = title, colonne = Settimana, valori = Diff_pct (per colori), units per tooltip
             pivot_diff_pct = adelphi_df.pivot(index='title', columns='Settimana', values='Diff_pct')
             pivot_units = adelphi_df.pivot(index='title', columns='Settimana', values='units')
-            # Per formato long, melt entrambi e merge
             pivot_diff_pct_long = pivot_diff_pct.reset_index().melt(id_vars='title', var_name='Settimana', value_name='Diff_pct')
             pivot_units_long = pivot_units.reset_index().melt(id_vars='title', var_name='Settimana', value_name='units')
             pivot_df = pd.merge(pivot_diff_pct_long, pivot_units_long, on=['title', 'Settimana'])
-            pivot_df = pivot_df.merge(adelphi_df[['Settimana', 'Week_Num']].drop_duplicates(), on='Settimana')  # Aggiungi Week_Num per sort
+            pivot_df = pivot_df.merge(adelphi_df[['Settimana', 'Week_Num']].drop_duplicates(), on='Settimana')
             
-            # Heatmap con Altair: colori basati su Diff_pct (rosso per negativo, verde per positivo)
             st.subheader("Heatmap Variazioni Percentuali (%) - Verde: Crescita, Rosso: Calo")
-            heatmap = alt.Chart(pivot_df).mark_rect().encode(
-                x=alt.X('Settimana:O', sort=alt.EncodingSortField(field='Week_Num', order='ascending')),
-                y=alt.Y('title:O', sort=total_units_per_title),
-                color=alt.Color('Diff_pct:Q', scale=alt.Scale(scheme='redyellowgreen', domainMid=0), title='Variazione %'),
-                tooltip=['title', 'Settimana', 'units', 'Diff_pct']
-            ).properties(width='container').interactive(bind_y=True)  # Abilita zoom su y (titoli)
+            heatmap = create_heatmap(pivot_df)
             st.altair_chart(heatmap, use_container_width=True)
             
-            # Mostra anche il dataframe raw per riferimento (per CTRL+F sui titoli)
             st.dataframe(adelphi_df[['title', 'Settimana', 'units', 'Diff_pct']])
         else:
             st.info("Nessun dato disponibile per l'editore 'Adelphi'.")
