@@ -1,4 +1,4 @@
-# app.py (fixed: Updated Adelphi tab to handle duplicates with 'collana', pivot on combined 'title_collana')
+# app.py (fixed: Conditional 'collana' inclusion to avoid KeyError; used combined 'title_collana' for pivot to handle duplicates; added forecasting conditionally)
 
 import streamlit as st
 import pandas as pd
@@ -227,7 +227,8 @@ if dataframes:
                 adelphi_df = week_df[week_df['publisher'].str.contains('Adelphi', case=False, na=False)]
                 if not adelphi_df.empty:
                     columns = ['title', 'author', 'units']
-                    if 'collana' in week_df.columns:
+                    has_collana = 'collana' in week_df.columns
+                    if has_collana:
                         columns.append('collana')
                     adelphi_df = adelphi_df[columns].copy()
                     adelphi_df['Settimana'] = week
@@ -240,7 +241,7 @@ if dataframes:
             adelphi_df['title'] = adelphi_df['title'].apply(normalize_title)
             group_cols = ['title', 'author', 'Settimana', 'Week_Num']
             dup_subset = ['title', 'Settimana']
-            if 'collana' in adelphi_df.columns:
+            if has_collana and 'collana' in adelphi_df.columns:
                 group_cols.append('collana')
                 dup_subset.append('collana')
             adelphi_df = adelphi_df.groupby(group_cols)['units'].sum().reset_index()
@@ -263,12 +264,11 @@ if dataframes:
                 st.dataframe(adelphi_df[duplicates])
                 st.stop()
             
-            # For heatmap, use combined title_collana if collana exists
-            if 'collana' in adelphi_df.columns:
-                adelphi_df['title_collana'] = adelphi_df['title'] + ' (' + adelphi_df['collana'] + ')'
+            # For heatmap, use combined title_collana if collana present
+            pivot_index = 'title'
+            if has_collana and 'collana' in adelphi_df.columns:
+                adelphi_df['title_collana'] = adelphi_df['title'] + ' (' + adelphi_df['collana'].fillna('Unknown') + ')'
                 pivot_index = 'title_collana'
-            else:
-                pivot_index = 'title'
             pivot_diff_pct = adelphi_df.pivot(index=pivot_index, columns='Settimana', values='Diff_pct')
             pivot_units = adelphi_df.pivot(index=pivot_index, columns='Settimana', values='units')
             pivot_diff_pct_long = pivot_diff_pct.reset_index().melt(id_vars=pivot_index, var_name='Settimana', value_name='Diff_pct')
