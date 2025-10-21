@@ -1,4 +1,4 @@
-# app.py (fixed: Made 'collana' inclusion conditional to avoid KeyError)
+# app.py (fixed: Updated Adelphi tab to handle duplicates with 'collana', pivot on combined 'title_collana')
 
 import streamlit as st
 import pandas as pd
@@ -239,8 +239,10 @@ if dataframes:
             adelphi_df = adelphi_df.dropna(subset=['title'])
             adelphi_df['title'] = adelphi_df['title'].apply(normalize_title)
             group_cols = ['title', 'author', 'Settimana', 'Week_Num']
+            dup_subset = ['title', 'Settimana']
             if 'collana' in adelphi_df.columns:
                 group_cols.append('collana')
+                dup_subset.append('collana')
             adelphi_df = adelphi_df.groupby(group_cols)['units'].sum().reset_index()
             if filters.get('title', []):
                 adelphi_df = adelphi_df[adelphi_df['title'].isin(filters['title'])]
@@ -255,17 +257,23 @@ if dataframes:
                 np.nan
             )
             
-            duplicates = adelphi_df.duplicated(subset=['title', 'Settimana'], keep=False)
+            duplicates = adelphi_df.duplicated(subset=dup_subset, keep=False)
             if duplicates.any():
                 st.error(f"Trovati dati duplicati per Adelphi. Titoli con duplicati: {adelphi_df[duplicates]['title'].unique().tolist()}")
                 st.dataframe(adelphi_df[duplicates])
                 st.stop()
             
-            pivot_diff_pct = adelphi_df.pivot(index='title', columns='Settimana', values='Diff_pct')
-            pivot_units = adelphi_df.pivot(index='title', columns='Settimana', values='units')
-            pivot_diff_pct_long = pivot_diff_pct.reset_index().melt(id_vars='title', var_name='Settimana', value_name='Diff_pct')
-            pivot_units_long = pivot_units.reset_index().melt(id_vars='title', var_name='Settimana', value_name='units')
-            pivot_df = pd.merge(pivot_diff_pct_long, pivot_units_long, on=['title', 'Settimana'])
+            # For heatmap, use combined title_collana if collana exists
+            if 'collana' in adelphi_df.columns:
+                adelphi_df['title_collana'] = adelphi_df['title'] + ' (' + adelphi_df['collana'] + ')'
+                pivot_index = 'title_collana'
+            else:
+                pivot_index = 'title'
+            pivot_diff_pct = adelphi_df.pivot(index=pivot_index, columns='Settimana', values='Diff_pct')
+            pivot_units = adelphi_df.pivot(index=pivot_index, columns='Settimana', values='units')
+            pivot_diff_pct_long = pivot_diff_pct.reset_index().melt(id_vars=pivot_index, var_name='Settimana', value_name='Diff_pct')
+            pivot_units_long = pivot_units.reset_index().melt(id_vars=pivot_index, var_name='Settimana', value_name='units')
+            pivot_df = pd.merge(pivot_diff_pct_long, pivot_units_long, on=[pivot_index, 'Settimana'])
             pivot_df = pivot_df.merge(adelphi_df[['Settimana', 'Week_Num']].drop_duplicates(), on='Settimana')
             
             st.subheader("Heatmap Variazioni Percentuali (%) - Verde: Crescita, Rosso: Calo")
@@ -279,9 +287,8 @@ if dataframes:
             if 'collana' in adelphi_df.columns:
                 collana_groups = adelphi_df.groupby('collana')
             else:
-                collana_groups = {'Tutti': adelphi_df}  # Fallback if no collana
+                collana_groups = [('Tutti', adelphi_df)]  # Fallback
                 st.warning("Colonna 'collana' non trovata. Previsione aggregata per tutti i titoli Adelphi.")
-                collana_groups = [('Tutti', adelphi_df)]
             for collana, group_df in collana_groups:
                 st.subheader(f"Collana: {collana}")
                 sales_data = group_df.groupby('Week_Num')['units'].sum().reset_index().set_index('Week_Num')
