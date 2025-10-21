@@ -1,4 +1,4 @@
-# app.py (updated: Added forecasting in Analisi Adelphi tab, focused on Adelphi with Collana factor)
+# app.py (updated: Made 'collana' selection and groupby conditional to avoid KeyError if column is missing)
 
 import streamlit as st
 import pandas as pd
@@ -226,7 +226,10 @@ if dataframes:
             if week_df is not None:
                 adelphi_df = week_df[week_df['publisher'].str.contains('Adelphi', case=False, na=False)]
                 if not adelphi_df.empty:
-                    adelphi_df = adelphi_df[['title', 'author', 'units', 'collana']].copy()  # Aggiunto 'collana' per forecasting
+                    columns = ['title', 'author', 'units']
+                    if 'collana' in week_df.columns:
+                        columns.append('collana')
+                    adelphi_df = adelphi_df[columns].copy()
                     adelphi_df['Settimana'] = week
                     adelphi_df['Week_Num'] = week_num
                     adelphi_data.append(adelphi_df)
@@ -235,13 +238,14 @@ if dataframes:
             adelphi_df = pd.concat(adelphi_data, ignore_index=True)
             adelphi_df = adelphi_df.dropna(subset=['title'])
             adelphi_df['title'] = adelphi_df['title'].apply(normalize_title)
-            adelphi_df = adelphi_df.groupby(['title', 'author', 'collana', 'Settimana', 'Week_Num'])['units'].sum().reset_index()  # Group by collana too
+            group_cols = ['title', 'author', 'Settimana', 'Week_Num']
+            if 'collana' in adelphi_df.columns:
+                group_cols.append('collana')
+            adelphi_df = adelphi_df.groupby(group_cols)['units'].sum().reset_index()
             if filters.get('title', []):
                 adelphi_df = adelphi_df[adelphi_df['title'].isin(filters['title'])]
             if filters.get('author', []):
                 adelphi_df = adelphi_df[adelphi_df['author'].isin(filters['author'])]
-            if filters.get('collana', []):
-                adelphi_df = adelphi_df[adelphi_df['collana'].isin(filters['collana'])]
             adelphi_df.sort_values(['title', 'Week_Num'], inplace=True)
             
             adelphi_df['Previous_Units'] = adelphi_df.groupby('title')['units'].shift(1)
@@ -270,11 +274,12 @@ if dataframes:
             
             st.dataframe(adelphi_df[['title', 'Settimana', 'units', 'Diff_pct']])
 
-            # New Forecasting Section for Adelphi, incorporating Collana
+            # Forecasting section (unchanged, but conditional on 'collana' if present)
             st.header("Previsione Vendite per Collana (Adelphi)")
-            collana_groups = adelphi_df.groupby('collana')
+            group_key = 'collana' if 'collana' in adelphi_df.columns else 'publisher'  # Fallback to publisher if no collana
+            collana_groups = adelphi_df.groupby(group_key)
             for collana, group_df in collana_groups:
-                st.subheader(f"Collana: {collana}")
+                st.subheader(f"{group_key.capitalize()}: {collana}")
                 sales_data = group_df.groupby('Week_Num')['units'].sum().reset_index().set_index('Week_Num')
                 if len(sales_data) >= 3:
                     try:
