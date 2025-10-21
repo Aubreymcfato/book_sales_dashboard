@@ -1,4 +1,4 @@
-# app.py (updated: Added forecasting section in Principale tab for selected titles)
+# app.py (updated: Added forecasting in Analisi Adelphi tab, focused on Adelphi with Collana factor)
 
 import streamlit as st
 import pandas as pd
@@ -66,8 +66,7 @@ if dataframes:
                         filters[col] = st.sidebar.selectbox(filter_labels[col], ["Tutti"] + [str(val) for val in unique_values], index=0 if initial_value == "Tutti" else unique_values.index(float(initial_value)) + 1)
                         st.query_params[col] = str(filters[col]) if filters[col] != "Tutti" else []
                     else:
-                        valid_initial = [v for v in initial_value if v in unique_values]
-                        filters[col] = st.sidebar.multiselect(filter_labels[col], unique_values, default=valid_initial)
+                        filters[col] = st.sidebar.multiselect(filter_labels[col], unique_values, default=initial_value)
                         st.query_params[col] = filters[col]
 
             if st.sidebar.button("Reimposta Filtri"):
@@ -218,50 +217,16 @@ if dataframes:
                                 st.altair_chart(chart_publisher_books, use_container_width=True)
                                 st.dataframe(trend_df_publisher_books)
 
-                        # New section: Predictive Sales Forecasting (only for single title selection)
-                        if len(selected_title) == 1:
-                            st.header("Previsione Vendite")
-                            title = selected_title[0]
-                            sales_data = []
-                            for week, week_df in sorted(dataframes.items(), key=lambda x: int(re.search(r'Settimana\s*(\d+)', x[0], re.IGNORECASE).group(1))):
-                                week_num = int(re.search(r'Settimana\s*(\d+)', week, re.IGNORECASE).group(1))
-                                if week_df is not None:
-                                    title_df = week_df[week_df['title'] == title]
-                                    units = title_df['units'].sum() if not title_df.empty else 0
-                                    sales_data.append({"Week_Num": week_num, "Unità Vendute": units})
-                            if len(sales_data) >= 3:  # Require at least 3 data points for ARIMA
-                                sales_df = pd.DataFrame(sales_data).set_index('Week_Num')
-                                try:
-                                    model = ARIMA(sales_df['Unità Vendute'], order=(1, 1, 1))
-                                    model_fit = model.fit()
-                                    forecast_steps = 4  # Predict next 4 weeks
-                                    forecast = model_fit.forecast(steps=forecast_steps)
-                                    forecast_df = pd.DataFrame({
-                                        'Settimana': [f"Settimana {len(sales_data) + i + 1}" for i in range(forecast_steps)],
-                                        'Previsione Unità Vendute': forecast.round().astype(int)
-                                    })
-                                    st.dataframe(forecast_df)
-                                    # Forecast chart
-                                    forecast_chart = alt.Chart(forecast_df).mark_line(point=True, color='red').encode(
-                                        x='Settimana:N',
-                                        y='Previsione Unità Vendute:Q',
-                                        tooltip=['Settimana', 'Previsione Unità Vendute']
-                                    ).properties(width='container').interactive()
-                                    st.altair_chart(forecast_chart, use_container_width=True)
-                                except Exception as e:
-                                    st.warning(f"Impossibile generare previsione: {e}")
-                            else:
-                                st.warning("Dati insufficienti per la previsione (richiesti almeno 3 settimane).")
-
     with tab3:
         st.header("Analisi Variazioni Settimanali per Adelphi")
+        
         adelphi_data = []
         for week, week_df in sorted(dataframes.items(), key=lambda x: int(re.search(r'Settimana\s*(\d+)', x[0], re.IGNORECASE).group(1))):
             week_num = int(re.search(r'Settimana\s*(\d+)', week, re.IGNORECASE).group(1))
             if week_df is not None:
                 adelphi_df = week_df[week_df['publisher'].str.contains('Adelphi', case=False, na=False)]
                 if not adelphi_df.empty:
-                    adelphi_df = adelphi_df[['title', 'author', 'units']].copy()
+                    adelphi_df = adelphi_df[['title', 'author', 'units', 'collana']].copy()  # Aggiunto 'collana' per forecasting
                     adelphi_df['Settimana'] = week
                     adelphi_df['Week_Num'] = week_num
                     adelphi_data.append(adelphi_df)
@@ -270,11 +235,13 @@ if dataframes:
             adelphi_df = pd.concat(adelphi_data, ignore_index=True)
             adelphi_df = adelphi_df.dropna(subset=['title'])
             adelphi_df['title'] = adelphi_df['title'].apply(normalize_title)
-            adelphi_df = adelphi_df.groupby(['title', 'author', 'Settimana', 'Week_Num'])['units'].sum().reset_index()
+            adelphi_df = adelphi_df.groupby(['title', 'author', 'collana', 'Settimana', 'Week_Num'])['units'].sum().reset_index()  # Group by collana too
             if filters.get('title', []):
                 adelphi_df = adelphi_df[adelphi_df['title'].isin(filters['title'])]
             if filters.get('author', []):
                 adelphi_df = adelphi_df[adelphi_df['author'].isin(filters['author'])]
+            if filters.get('collana', []):
+                adelphi_df = adelphi_df[adelphi_df['collana'].isin(filters['collana'])]
             adelphi_df.sort_values(['title', 'Week_Num'], inplace=True)
             
             adelphi_df['Previous_Units'] = adelphi_df.groupby('title')['units'].shift(1)
@@ -302,7 +269,34 @@ if dataframes:
             st.altair_chart(heatmap, use_container_width=True)
             
             st.dataframe(adelphi_df[['title', 'Settimana', 'units', 'Diff_pct']])
-        else:
-            st.info("Nessun dato disponibile per l'editore 'Adelphi'.")
+
+            # New Forecasting Section for Adelphi, incorporating Collana
+            st.header("Previsione Vendite per Collana (Adelphi)")
+            collana_groups = adelphi_df.groupby('collana')
+            for collana, group_df in collana_groups:
+                st.subheader(f"Collana: {collana}")
+                sales_data = group_df.groupby('Week_Num')['units'].sum().reset_index().set_index('Week_Num')
+                if len(sales_data) >= 3:
+                    try:
+                        model = ARIMA(sales_data['units'], order=(1, 1, 1))
+                        model_fit = model.fit()
+                        forecast_steps = 4
+                        forecast = model_fit.forecast(steps=forecast_steps)
+                        forecast_df = pd.DataFrame({
+                            'Settimana': [f"Settimana {group_df['Week_Num'].max() + i + 1}" for i in range(forecast_steps)],
+                            'Previsione Unità Vendute': forecast.round().astype(int)
+                        })
+                        st.dataframe(forecast_df)
+                        forecast_chart = alt.Chart(forecast_df).mark_line(point=True, color='red').encode(
+                            x='Settimana:N',
+                            y='Previsione Unità Vendute:Q',
+                            tooltip=['Settimana', 'Previsione Unità Vendute']
+                        ).properties(width='container').interactive()
+                        st.altair_chart(forecast_chart, use_container_width=True)
+                    except Exception as e:
+                        st.warning(f"Impossibile generare previsione per {collana}: {e}")
+                else:
+                    st.warning(f"Dati insufficienti per la previsione in {collana} (richiesti almeno 3 settimane).")
+
 else:
     st.info("Nessun file XLSX valido in data/.")
