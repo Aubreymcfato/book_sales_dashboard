@@ -1,4 +1,4 @@
-# app.py (fixed: Filtered initial_value to prevent invalid defaults in multiselect)
+# app.py (FINAL MERGED VERSION – ALL FIXES APPLIED)
 
 import streamlit as st
 import pandas as pd
@@ -7,12 +7,12 @@ import io
 import numpy as np
 import re
 from data_utils import load_all_dataframes, filter_data, aggregate_group_data, aggregate_all_weeks, normalize_title
-from viz_utils import create_top_books_chart, create_top_authors_chart, create_top_publishers_chart, create_trend_chart, create_publisher_books_trend_chart, create_heatmap
+from viz_utils import create_top_books_chart, create_top_authors_chart, create_top_publishers_chart, create_heatmap
 from statsmodels.tsa.arima.model import ARIMA
 
 # Configurazione iniziale
 st.set_page_config(page_title="Dashboard Vendite Libri", layout="wide")
-st.title("📚 Dashboard Vendite Libri")
+st.title("Dashboard Vendite Libri")
 
 # Stile personalizzato
 st.markdown("""
@@ -55,21 +55,17 @@ if dataframes:
         if df is not None:
             st.sidebar.header("Filtri")
             filters = {}
-            filter_cols = ["rank", "publisher", "author", "title", "collana"]
-            filter_labels = {"rank": "Classifica", "publisher": "Editore", "author": "Autore", "title": "Titolo", "collana": "Collana"}
+            filter_cols = ["publisher", "author", "title", "collana"]
+            filter_labels = {"publisher": "Editore", "author": "Autore", "title": "Titolo", "collana": "Collana"}
+
             for col in filter_cols:
                 if col in df.columns:
                     unique_values = sorted(df[col].dropna().unique())
                     initial_value = query_params.get(col, [])
-                    if col == "rank":
-                        initial_value = initial_value[0] if initial_value else "Tutti"
-                        filters[col] = st.sidebar.selectbox(filter_labels[col], ["Tutti"] + [str(val) for val in unique_values], index=0 if initial_value == "Tutti" else unique_values.index(float(initial_value)) + 1)
-                        st.query_params[col] = str(filters[col]) if filters[col] != "Tutti" else []
-                    else:
-                        # Filter initial_value to only include valid options
-                        valid_initial = [v for v in initial_value if v in unique_values]
-                        filters[col] = st.sidebar.multiselect(filter_labels[col], unique_values, default=valid_initial)
-                        st.query_params[col] = filters[col]
+                    # Only keep valid defaults
+                    valid_initial = [v for v in initial_value if v in unique_values]
+                    filters[col] = st.sidebar.multiselect(filter_labels[col], unique_values, default=valid_initial)
+                    st.query_params[col] = filters[col]
 
             if st.sidebar.button("Reimposta Filtri"):
                 st.query_params.clear()
@@ -77,10 +73,13 @@ if dataframes:
 
             filtered_df = filter_data(df, filters, is_aggregate=is_aggregate)
             if filtered_df is not None and not filtered_df.empty:
+                # Optional: hide rank column in display
+                display_df = filtered_df.drop(columns=["rank"], errors="ignore")
+
                 col1, col2 = st.columns(2)
                 with col1:
                     st.header(f"Dati - {selected_week}")
-                    st.dataframe(filtered_df, use_container_width=True)
+                    st.dataframe(display_df, use_container_width=True)
                 with col2:
                     csv = filtered_df.to_csv(index=False).encode('utf-8')
                     st.download_button("Scarica CSV", data=csv, file_name="dati_filtrati.csv", mime="text/csv")
@@ -120,8 +119,8 @@ if dataframes:
                     selected_publisher = filters.get('publisher', [])
                     if selected_title or selected_author or selected_publisher:
                         st.header("Andamento Settimanale")
-                        trend_data_books = []  # Per libri singoli (se autore)
-                        trend_data_sum = []    # Per somma (autore, editore, titolo)
+                        trend_data_books = []
+                        trend_data_sum = []
                         for week, week_df in sorted(dataframes.items(), key=lambda x: int(re.search(r'Settimana\s*(\d+)', x[0], re.IGNORECASE).group(1))):
                             week_num = int(re.search(r'Settimana\s*(\d+)', week, re.IGNORECASE).group(1))
                             if week_df is not None:
@@ -138,34 +137,26 @@ if dataframes:
                                     selected_items_sum = selected_publisher
                                 elif selected_author:
                                     week_filtered = week_filtered[week_filtered['author'].isin(selected_author)]
-                                    group_by = 'title'  # Per autori, aggrega per titolo per linee multiple
-                                    selected_items_books = week_filtered['title'].unique().tolist()  # Tutti i libri dell'autore
-                                    selected_items_sum = selected_author  # Per somma per autore
+                                    group_by = 'title'
+                                    selected_items_books = week_filtered['title'].unique().tolist()
+                                    selected_items_sum = selected_author
 
                                 if not week_filtered.empty:
-                                    # Per somma (per titolo, editore, o autore)
                                     for item in selected_items_sum:
                                         item_df = week_filtered[week_filtered['author' if selected_author else group_by] == item] if selected_author else week_filtered[week_filtered[group_by] == item]
                                         if not item_df.empty:
                                             trend_data_sum.append({"Settimana": week, "Unità Vendute": item_df["units"].sum(), "Item": item, "Week_Num": week_num})
 
-                                    # Per libri singoli (solo per autore)
                                     if selected_author and selected_items_books:
                                         for item in selected_items_books:
                                             item_df = week_filtered[week_filtered[group_by] == item]
                                             if not item_df.empty:
                                                 trend_data_books.append({"Settimana": week, "Unità Vendute": item_df["units"].sum(), "Item": item, "Week_Num": week_num})
 
-                        # Grafico per somma
                         if trend_data_sum:
                             trend_df_sum = pd.DataFrame(trend_data_sum)
                             trend_df_sum.sort_values('Week_Num', inplace=True)
-                            if selected_title:
-                                subheader_sum = "Andamento per Titolo"
-                            elif selected_author:
-                                subheader_sum = "Andamento per Autore (Somma)"
-                            elif selected_publisher:
-                                subheader_sum = "Andamento per Editore (Somma)"
+                            subheader_sum = "Andamento per " + ("Titolo" if selected_title else "Autore (Somma)" if selected_author else "Editore (Somma)")
                             st.subheader(subheader_sum)
                             chart_sum = alt.Chart(trend_df_sum).mark_line(point=True).encode(
                                 x=alt.X('Settimana:N', sort=alt.EncodingSortField(field='Week_Num', order='ascending'), title='Settimana'),
@@ -176,7 +167,6 @@ if dataframes:
                             st.altair_chart(chart_sum, use_container_width=True)
                             st.dataframe(trend_df_sum)
 
-                        # Grafico per libri singoli (solo per autore)
                         if selected_author and trend_data_books:
                             trend_df_books = pd.DataFrame(trend_data_books)
                             trend_df_books.sort_values('Week_Num', inplace=True)
@@ -190,10 +180,8 @@ if dataframes:
                             st.altair_chart(chart_books, use_container_width=True)
                             st.dataframe(trend_df_books)
 
-                        # Grafico aggiuntivo: Andamento settimanale dei primi 20 libri di un singolo editore
                         if len(selected_publisher) == 1 and is_aggregate:
                             trend_data_publisher_books = []
-                            # Trova i primi 20 libri dell'editore per vendite totali
                             publisher_books = aggregate_all_weeks(dataframes)
                             publisher_books = publisher_books[publisher_books['publisher'].isin(selected_publisher)]
                             top_20_titles = publisher_books.nlargest(20, 'units')['title'].tolist()
@@ -268,14 +256,12 @@ if dataframes:
                 st.dataframe(adelphi_df[duplicates][group_cols + ['units']])
                 st.stop()
             
-            # For heatmap, use combined title_collana if collana present
             pivot_index = 'title'
             if has_collana and 'collana' in adelphi_df.columns:
                 adelphi_df['title_collana'] = adelphi_df['title'] + ' (' + adelphi_df['collana'].fillna('Sconosciuta') + ')'
                 pivot_index = 'title_collana'
             pivot_diff_pct = adelphi_df.pivot(index=pivot_index, columns='Settimana', values='Diff_pct')
             pivot_units = adelphi_df.pivot(index=pivot_index, columns='Settimana', values='units')
-            # Clean pivot data
             pivot_diff_pct = pivot_diff_pct.fillna(0)
             pivot_units = pivot_units.fillna(0)
             pivot_diff_pct_long = pivot_diff_pct.reset_index().melt(id_vars=pivot_index, var_name='Settimana', value_name='Diff_pct')
@@ -296,7 +282,6 @@ if dataframes:
                 display_cols.insert(1, 'collana')
             st.dataframe(adelphi_df[display_cols])
 
-            # Previsione Vendite per Collana (Adelphi)
             st.header("Previsione Vendite per Collana (Adelphi)")
             if has_collana and 'collana' in adelphi_df.columns:
                 collana_groups = adelphi_df.groupby('collana')
