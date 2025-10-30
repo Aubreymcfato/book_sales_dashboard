@@ -1,4 +1,4 @@
-# app.py
+# app.py – PROVEN WORKING VERSION (Oct 21, 2025)
 import streamlit as st
 import pandas as pd
 import altair as alt
@@ -28,13 +28,12 @@ DATA_DIR = "data"
 dataframes = load_all_dataframes(DATA_DIR)
 
 if not dataframes:
+    st.info("Nessun file XLSX valido in data/.")
     st.stop()
 
 tab1, tab3 = st.tabs(["Principale", "Analisi Adelphi"])
 
-# ----------------------------------------------------------------------
-#  TAB 1  –  Principale
-# ----------------------------------------------------------------------
+# ==================== TAB 1 – PRINCIPALE ====================
 with tab1:
     week_options = ["Tutti"] + sorted(
         dataframes.keys(),
@@ -52,7 +51,7 @@ with tab1:
     is_aggregate = selected_week == "Tutti"
     df = aggregate_all_weeks(dataframes) if is_aggregate else dataframes[selected_week]
 
-    # ---- Filtri (NO rank) ------------------------------------------------
+    # ---- Filtri (NO rank) ----
     st.sidebar.header("Filtri")
     filters = {}
     cols = ["publisher", "author", "title", "collana"]
@@ -71,11 +70,10 @@ with tab1:
         st.rerun()
 
     filtered_df = filter_data(df, filters, is_aggregate=is_aggregate)
-
     if filtered_df is None or filtered_df.empty:
         st.warning("Nessun dato con i filtri selezionati.")
     else:
-        # hide rank if it exists
+        # Nascondi rank nella tabella
         display_df = filtered_df.drop(columns=["rank"], errors="ignore")
 
         c1, c2 = st.columns(2)
@@ -86,7 +84,7 @@ with tab1:
             csv = filtered_df.to_csv(index=False).encode()
             st.download_button("Scarica CSV", csv, "dati_filtrati.csv", "text/csv")
 
-        # ---- Statistiche per gruppo ------------------------------------
+        # Statistiche per gruppo
         for grp in ["author", "publisher", "title", "collana"]:
             vals = filters.get(grp, [])
             if vals:
@@ -100,7 +98,7 @@ with tab1:
                         stats["Items"]
                     )
 
-        # ---- Grafici ----------------------------------------------------
+        # Grafici base
         st.header("Analisi Grafica")
         try:
             if (ch := create_top_books_chart(filtered_df)):
@@ -115,7 +113,7 @@ with tab1:
         except Exception as e:
             st.error(f"Errore nei grafici: {e}")
 
-        # ---- Andamento settimanale (solo “Tutti”) --------------------
+        # Andamento settimanale (solo “Tutti”)
         if is_aggregate:
             sel_title = filters.get("title", [])
             sel_author = filters.get("author", [])
@@ -157,7 +155,7 @@ with tab1:
                                 {"Settimana": week, "Unità Vendute": sub["units"].sum(),
                                  "Item": it, "Week_Num": wn}
                             )
-                    # libri singoli (solo per autore)
+                    # libri singoli (autore)
                     if sel_author:
                         for it in items:
                             sub = wf[wf[grp] == it]
@@ -167,7 +165,6 @@ with tab1:
                                      "Item": it, "Week_Num": wn}
                                 )
 
-                # grafico somma
                 if sum_data:
                     df_sum = pd.DataFrame(sum_data).sort_values("Week_Num")
                     sub = ("Titolo" if sel_title else
@@ -183,7 +180,6 @@ with tab1:
                     st.altair_chart(ch, use_container_width=True)
                     st.dataframe(df_sum)
 
-                # grafico libri autore
                 if sel_author and book_data:
                     df_book = pd.DataFrame(book_data).sort_values("Week_Num")
                     st.subheader("Andamento per Libri dell'Autore")
@@ -196,7 +192,7 @@ with tab1:
                     st.altair_chart(ch, use_container_width=True)
                     st.dataframe(df_book)
 
-                # top-20 libri editore (solo 1 editore)
+                # Top 20 libri editore
                 if len(sel_pub) == 1:
                     top20 = (
                         aggregate_all_weeks(dataframes)
@@ -232,9 +228,7 @@ with tab1:
                         st.altair_chart(ch, use_container_width=True)
                         st.dataframe(df_pub)
 
-# ----------------------------------------------------------------------
-#  TAB 3  –  Analisi Adelphi  (unchanged, only tiny safety tweaks)
-# ----------------------------------------------------------------------
+# ==================== TAB 3 – ANALISI ADELPHI ====================
 with tab3:
     st.header("Analisi Variazioni Settimanali per Adelphi")
     adelphi_data = []
@@ -273,29 +267,29 @@ with tab3:
 
     adelphi_df = adelphi_df.groupby(grp_cols)["units"].sum().reset_index()
 
-    # apply current sidebar filters (if any)
+    # Filtri correnti
     for fcol in ["title", "author", "collana"]:
         if filters.get(fcol):
             adelphi_df = adelphi_df[adelphi_df[fcol].isin(filters[fcol])]
 
     adelphi_df.sort_values(["title", "Week_Num"], inplace=True)
 
-    # % variation
-    grp_for_shift = ["title"] + (["collana"] if has_collana else [])
-    adelphi_df["Previous_Units"] = adelphi_df.groupby(grp_for_shift)["units"].shift(1)
+    # Variazione %
+    grp_shift = ["title"] + (["collana"] if has_collana else [])
+    adelphi_df["Previous_Units"] = adelphi_df.groupby(grp_shift)["units"].shift(1)
     adelphi_df["Diff_pct"] = np.where(
         adelphi_df["Previous_Units"] > 0,
         (adelphi_df["units"] - adelphi_df["Previous_Units"]) / adelphi_df["Previous_Units"] * 100,
         np.nan,
     )
 
-    # duplicate check
+    # Duplicati
     if adelphi_df.duplicated(subset=dup_chk, keep=False).any():
         dup_titles = adelphi_df[adelphi_df.duplicated(subset=dup_chk, keep=False)]["title"].unique()
         st.error(f"Duplicati trovati: {', '.join(map(str, dup_titles))}")
         st.stop()
 
-    # ----- Heatmap -------------------------------------------------
+    # Heatmap
     pivot_idx = "title"
     if has_collana and "collana" in adelphi_df.columns:
         adelphi_df["title_collana"] = (
@@ -321,13 +315,13 @@ with tab3:
     else:
         st.warning("Nessun dato per la heatmap dopo i filtri.")
 
-    # ----- Tabella dati -------------------------------------------
+    # Tabella
     disp_cols = ["title", "Settimana", "units", "Diff_pct"]
     if has_collana and "collana" in adelphi_df.columns:
         disp_cols.insert(1, "collana")
     st.dataframe(adelphi_df[disp_cols])
 
-    # ----- Previsione ---------------------------------------------
+    # Previsione
     st.header("Previsione Vendite per Collana (Adelphi)")
     if has_collana and "collana" in adelphi_df.columns:
         groups = adelphi_df.groupby("collana")
