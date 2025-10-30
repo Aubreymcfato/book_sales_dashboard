@@ -1,4 +1,4 @@
-# data_utils.py (updated: Added publisher normalization)
+# data_utils.py (FINAL – robust aggregation + normalization)
 
 import streamlit as st
 import pandas as pd
@@ -19,7 +19,7 @@ def normalize_title(title):
 
 def normalize_publisher(publisher):
     if isinstance(publisher, str):
-        return publisher.strip().title()  # Normalize: strip whitespace, convert to title case
+        return publisher.strip().title()
     return publisher
 
 @st.cache_data
@@ -30,7 +30,7 @@ def load_data(file_path):
         rank_variants = ["rank", "rango", "classifica"]
         rank_col = next((col for col in df.columns if col in rank_variants), None)
         if not rank_col:
-            st.error(f"File {os.path.basename(file_path)} manca colonna 'Rank' o varianti. Colonne trovate: {list(df.columns)}")
+            st.error(f"File {os.path.basename(file_path)} manca colonna 'Rank' o varianti.")
             return None
         df = df.rename(columns={rank_col: "rank"})
         df = df[df["rank"].apply(lambda x: pd.notna(x) and isinstance(x, (int, float)))]
@@ -45,7 +45,6 @@ def load_data(file_path):
             df['title'] = df['title'].apply(normalize_title)
         if 'publisher' in df.columns:
             df['publisher'] = df['publisher'].apply(normalize_publisher)
-        # Normalizza colonna "collana"
         collana_variants = ["collection", "series", "collana", "collection/series"]
         collana_col = next((col for col in df.columns if col in collana_variants), None)
         if collana_col:
@@ -60,16 +59,11 @@ def filter_data(df, filters, is_aggregate=False):
         return None
     filtered_df = df.copy()
     for col, value in filters.items():
-        if value and value != "Tutti":
+        if value:
             if isinstance(value, list):
                 filtered_df = filtered_df[filtered_df[col].isin(value)]
             else:
-                if col == "rank" and is_aggregate:
-                    continue
-                if col == "rank":
-                    filtered_df = filtered_df[filtered_df[col] == float(value)]
-                else:
-                    filtered_df = filtered_df[filtered_df[col] == value]
+                filtered_df = filtered_df[filtered_df[col] == value]
     return filtered_df
 
 def aggregate_group_data(df, group_by, values):
@@ -87,12 +81,19 @@ def aggregate_all_weeks(dataframes):
     all_dfs = [df for df in dataframes.values() if df is not None]
     if not all_dfs:
         return None
+
+    for df in all_dfs:
+        if 'title' in df.columns:
+            df['title'] = df['title'].apply(normalize_title)
+        if 'publisher' in df.columns:
+            df['publisher'] = df['publisher'].apply(normalize_publisher)
+
     combined_df = pd.concat(all_dfs, ignore_index=True)
-    if 'title' in combined_df.columns:
-        combined_df['title'] = combined_df['title'].apply(normalize_title)
-    if 'publisher' in combined_df.columns:
-        combined_df['publisher'] = combined_df['publisher'].apply(normalize_publisher)
-    agg_df = combined_df.groupby(["publisher", "author", "title", "collana"], as_index=False)["units"].sum()
+    all_cols = set()
+    for df in all_dfs:
+        all_cols.update(df.columns)
+    group_cols = [c for c in all_cols if c != "units"]
+    agg_df = combined_df.groupby(group_cols, as_index=False, dropna=False)["units"].sum()
     return agg_df
 
 def load_all_dataframes(data_dir):
