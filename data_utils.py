@@ -1,122 +1,104 @@
-# data_utils.py (FINAL – robust aggregation + normalization)
-
+# data_utils.py
 import streamlit as st
 import pandas as pd
-import numpy as np
-import os
-import glob
-import re
+import os, glob, re
 from concurrent.futures import ThreadPoolExecutor
 
-def normalize_title(title):
-    if isinstance(title, str):
-        stripped = title.strip()
-        lower_stripped = stripped.lower()
-        if lower_stripped in ["l' avversario", "l'avversario"]:
+def normalize_title(t):
+    if isinstance(t, str):
+        s = t.strip()
+        if s.lower() in ["l' avversario", "l'avversario"]:
             return "L'avversario"
-        return stripped
-    return title
+        return s
+    return t
 
-def normalize_publisher(publisher):
-    if isinstance(publisher, str):
-        return publisher.strip().title()
-    return publisher
+def normalize_publisher(p):
+    if isinstance(p, str):
+        return p.strip().title()
+    return p
 
 @st.cache_data
-def load_data(file_path):
+def load_data(path):
     try:
-        df = pd.read_excel(file_path, sheet_name="Export", header=0, engine="openpyxl")
-        df.columns = [str(col).strip().lower().replace(" ", "_") for col in df.columns]
-        rank_variants = ["rank", "rango", "classifica"]
-        rank_col = next((col for col in df.columns if col in rank_variants), None)
+        df = pd.read_excel(path, sheet_name="Export", engine="openpyxl")
+        df.columns = [str(c).strip().lower().replace(" ", "_") for c in df.columns]
+
+        rank_col = next((c for c in df.columns if c in ["rank", "rango", "classifica"]), None)
         if not rank_col:
-            st.error(f"File {os.path.basename(file_path)} manca colonna 'Rank' o varianti.")
+            st.error(f"{os.path.basename(path)} manca colonna rank.")
             return None
         df = df.rename(columns={rank_col: "rank"})
-        df = df[df["rank"].apply(lambda x: pd.notna(x) and isinstance(x, (int, float)))]
-        if df.empty:
-            st.error(f"File {os.path.basename(file_path)} non contiene righe valide per 'Rank'.")
-            return None
-        numeric_cols = ["rank", "units"]
-        for col in numeric_cols:
-            if col in df.columns:
-                df[col] = pd.to_numeric(df[col], errors="coerce")
-        if 'title' in df.columns:
-            df['title'] = df['title'].apply(normalize_title)
-        if 'publisher' in df.columns:
-            df['publisher'] = df['publisher'].apply(normalize_publisher)
-        collana_variants = ["collection", "series", "collana", "collection/series"]
-        collana_col = next((col for col in df.columns if col in collana_variants), None)
+        df = df[pd.notna(df["rank"]) & df["rank"].apply(lambda x: isinstance(x, (int, float)))]
+
+        for c in ["rank", "units"]:
+            if c in df.columns:
+                df[c] = pd.to_numeric(df[c], errors="coerce")
+
+        if "title" in df.columns:
+            df["title"] = df["title"].apply(normalize_title)
+        if "publisher" in df.columns:
+            df["publisher"] = df["publisher"].apply(normalize_publisher)
+
+        collana_col = next((c for c in df.columns if c in ["collection", "series", "collana"]), None)
         if collana_col:
             df = df.rename(columns={collana_col: "collana"})
         return df
     except Exception as e:
-        st.error(f"Errore nel caricamento di {os.path.basename(file_path)}: {e}")
+        st.error(f"Errore {os.path.basename(path)}: {e}")
         return None
 
 def filter_data(df, filters, is_aggregate=False):
     if df is None:
         return None
-    filtered_df = df.copy()
-    for col, value in filters.items():
-        if value:
-            if isinstance(value, list):
-                filtered_df = filtered_df[filtered_df[col].isin(value)]
-            else:
-                filtered_df = filtered_df[filtered_df[col] == value]
-    return filtered_df
+    f = df.copy()
+    for col, vals in filters.items():
+        if vals:
+            f = f[f[col].isin(vals)] if isinstance(vals, list) else f[f[col] == vals]
+    return f
 
-def aggregate_group_data(df, group_by, values):
-    if df is None or not values:
+def aggregate_group_data(df, by, values):
+    if not values or df is None:
         return None
-    group_df = df[df[group_by].isin(values)] if isinstance(values, list) else df[df[group_by] == values]
-    if group_df.empty:
+    sub = df[df[by].isin(values)] if isinstance(values, list) else df[df[by] == values]
+    if sub.empty:
         return None
     return {
-        "Total Units": group_df["units"].sum(),
-        "Items": len(group_df["title"].unique()) if group_by != "title" else len(values) if isinstance(values, list) else 1
+        "Total Units": sub["units"].sum(),
+        "Items": len(sub["title"].unique()) if by != "title" else (len(values) if isinstance(values, list) else 1)
     }
 
-def aggregate_all_weeks(dataframes):
-    all_dfs = [df for df in dataframes.values() if df is not None]
-    if not all_dfs:
+def aggregate_all_weeks(dfs_dict):
+    dfs = [d for d in dfs_dict.values() if d is not None]
+    if not dfs:
         return None
-
-    for df in all_dfs:
-        if 'title' in df.columns:
-            df['title'] = df['title'].apply(normalize_title)
-        if 'publisher' in df.columns:
-            df['publisher'] = df['publisher'].apply(normalize_publisher)
-
-    combined_df = pd.concat(all_dfs, ignore_index=True)
-    all_cols = set()
-    for df in all_dfs:
-        all_cols.update(df.columns)
+    for d in dfs:
+        if "title" in d.columns:
+            d["title"] = d["title"].apply(normalize_title)
+        if "publisher" in d.columns:
+            d["publisher"] = d["publisher"].apply(normalize_publisher)
+    combined = pd.concat(dfs, ignore_index=True)
+    all_cols = set(combined.columns)
     group_cols = [c for c in all_cols if c != "units"]
-    agg_df = combined_df.groupby(group_cols, as_index=False, dropna=False)["units"].sum()
-    return agg_df
+    return combined.groupby(group_cols, as_index=False, dropna=False)["units"].sum()
 
-def load_all_dataframes(data_dir):
-    dataframes = {}
-    if not os.path.exists(data_dir):
-        st.error(f"Cartella {data_dir} non trovata.")
-        return dataframes
-    xlsx_files = glob.glob(os.path.join(data_dir, "Classifica week*.xlsx"))
-    valid_files = []
-    for file_path in xlsx_files:
-        match = re.search(r'week\s*(\d+)', os.path.basename(file_path), re.IGNORECASE)
-        if match:
-            valid_files.append((file_path, int(match.group(1))))
+def load_all_dataframes(folder):
+    out = {}
+    if not os.path.isdir(folder):
+        st.error(f"Cartella {folder} non trovata.")
+        return out
+    files = glob.glob(os.path.join(folder, "Classifica week*.xlsx"))
+    valid = []
+    for f in files:
+        m = re.search(r'week\s*(\d+)', os.path.basename(f), re.I)
+        if m:
+            valid.append((f, int(m.group(1))))
         else:
-            st.warning(f"Nome file non valido: {os.path.basename(file_path)}")
-    valid_files = sorted(valid_files, key=lambda x: x[1])
-    file_paths = [fp for fp, _ in valid_files]
-    week_nums = [wn for _, wn in valid_files]
-    
-    with ThreadPoolExecutor() as executor:
-        dfs = list(executor.map(load_data, file_paths))
-    
-    for i in range(len(dfs)):
-        if dfs[i] is not None:
-            dataframes[f"Settimana {week_nums[i]}"] = dfs[i]
-    return dataframes
+            st.warning(f"Nome non valido: {os.path.basename(f)}")
+    valid.sort(key=lambda x: x[1])
+    paths, nums = zip(*valid) if valid else ([], [])
+    with ThreadPoolExecutor() as exe:
+        loaded = list(exe.map(load_data, paths))
+    for n, df in zip(nums, loaded):
+        if df is not None:
+            out[f"Settimana {n}"] = df
+    return out
