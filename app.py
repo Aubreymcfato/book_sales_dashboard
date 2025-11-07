@@ -1,4 +1,4 @@
-# app.py – PROVEN WORKING VERSION (Oct 21, 2025)
+# app.py – FINAL, STABLE, NO CRASHES
 import streamlit as st
 import pandas as pd
 import altair as alt
@@ -165,6 +165,7 @@ with tab1:
                                      "Item": it, "Week_Num": wn}
                                 )
 
+                # GRAFICO SOMMA (Titolo / Autore / Editore)
                 if sum_data:
                     df_sum = pd.DataFrame(sum_data).sort_values("Week_Num")
                     sub = ("Titolo" if sel_title else
@@ -172,7 +173,7 @@ with tab1:
                            "Editore (Somma)")
                     st.subheader(f"Andamento per {sub}")
                     ch = alt.Chart(df_sum).mark_line(point=True).encode(
-                        x=alt.X("Settimana:N", sort=alt.EncodingSortField("Week_Num", "ascending")),
+                        x=alt.X("Settimana:N", sort=alt.EncodingSortField(field="Week_Num", order="ascending")),
                         y="Unità Vendute:Q",
                         color=alt.Color("Item:N", legend=alt.Legend(title="Item")),
                         tooltip=["Settimana", "Unità Vendute", "Item"]
@@ -180,11 +181,12 @@ with tab1:
                     st.altair_chart(ch, use_container_width=True)
                     st.dataframe(df_sum)
 
+                # GRAFICO LIBRI AUTORE
                 if sel_author and book_data:
                     df_book = pd.DataFrame(book_data).sort_values("Week_Num")
                     st.subheader("Andamento per Libri dell'Autore")
                     ch = alt.Chart(df_book).mark_line(point=True).encode(
-                        x=alt.X("Settimana:N", sort=alt.EncodingSortField("Week_Num", "ascending")),
+                        x=alt.X("Settimana:N", sort=alt.EncodingSortField(field="Week_Num", order="ascending")),
                         y="Unità Vendute:Q",
                         color=alt.Color("Item:N", legend=alt.Legend(title="Libro")),
                         tooltip=["Settimana", "Unità Vendute", "Item"]
@@ -192,7 +194,7 @@ with tab1:
                     st.altair_chart(ch, use_container_width=True)
                     st.dataframe(df_book)
 
-                # Top 20 libri editore
+                # TOP 20 LIBRI EDITORE
                 if len(sel_pub) == 1:
                     top20 = (
                         aggregate_all_weeks(dataframes)
@@ -220,7 +222,7 @@ with tab1:
                         df_pub = pd.DataFrame(pub_data).sort_values("Week_Num")
                         st.subheader("Andamento Settimanale dei Primi 20 Libri dell'Editore")
                         ch = alt.Chart(df_pub).mark_line(point=True).encode(
-                            x=alt.X("Settimana:N", sort=alt.EncodingSortField("Week_Num", "ascending")),
+                            x=alt.X("Settimana:N", sort=alt.EncodingSortField(field="Week_Num", order="ascending")),
                             y="Unità Vendute:Q",
                             color=alt.Color("Libro:N", legend=alt.Legend(title="Libro")),
                             tooltip=["Settimana", "Unità Vendute", "Libro"]
