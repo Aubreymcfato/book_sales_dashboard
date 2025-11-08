@@ -1,4 +1,4 @@
-# app.py (fixed: Cleaned 'units' to numeric, replaced use_container_width with width="stretch", preserved all functionality)
+# app.py (full, stable version: removed forecasting, fixed numeric types, no is_aggregate in filter_data, width="stretch", light memory)
 
 import streamlit as st
 import pandas as pd
@@ -6,7 +6,7 @@ import altair as alt
 import numpy as np
 import re
 from data_utils import load_all_dataframes, filter_data, aggregate_group_data, aggregate_all_weeks, normalize_title
-from viz_utils import create_top_books_chart, create_top_authors_chart, create_top_publishers_chart, create_trend_chart, create_publisher_books_trend_chart, create_heatmap
+from viz_utils import create_top_books_chart, create_top_authors_chart, create_top_publishers_chart, create_heatmap
 
 # Configurazione iniziale
 st.set_page_config(page_title="Dashboard Vendite Libri", layout="wide")
@@ -51,9 +51,6 @@ if dataframes:
             df = dataframes[selected_week]
 
         if df is not None:
-            # Clean 'units' to numeric to avoid Arrow serialization errors
-            df['units'] = pd.to_numeric(df['units'], errors='coerce').fillna(0)
-
             st.sidebar.header("Filtri")
             filters = {}
             filter_cols = ["publisher", "author", "title", "collana"]
@@ -70,16 +67,13 @@ if dataframes:
                 st.query_params.clear()
                 st.rerun()
 
-            filtered_df = filter_data(df, filters, is_aggregate=is_aggregate)
+            filtered_df = filter_data(df, filters)
             if filtered_df is not None and not filtered_df.empty:
-                # Clean 'units' again for safety
-                filtered_df['units'] = pd.to_numeric(filtered_df['units'], errors='coerce').fillna(0)
-                display_df = filtered_df.drop(columns=["rank"], errors="ignore")
-
                 col1, col2 = st.columns(2)
                 with col1:
                     st.header(f"Dati - {selected_week}")
-                    st.dataframe(display_df, use_container_width=True)
+                    display_df = filtered_df.drop(columns=["rank"], errors="ignore")
+                    st.dataframe(display_df, width="stretch")
                 with col2:
                     csv = filtered_df.to_csv(index=False).encode('utf-8')
                     st.download_button("Scarica CSV", data=csv, file_name="dati_filtrati.csv", mime="text/csv")
@@ -201,7 +195,6 @@ if dataframes:
                     if 'collana' in week_df.columns:
                         columns.append('collana')
                     adelphi_df = adelphi_df[columns].copy()
-                    # Clean 'units' for this DataFrame
                     adelphi_df['units'] = pd.to_numeric(adelphi_df['units'], errors='coerce').fillna(0)
                     adelphi_df['Settimana'] = week
                     adelphi_df['Week_Num'] = week_num
