@@ -1,8 +1,5 @@
-# viz_utils.py (updated: Added pivot_index parameter to create_heatmap to handle dynamic y-axis field)
-
 import altair as alt
 import pandas as pd
-import re
 from data_utils import aggregate_all_weeks
 
 def create_top_books_chart(filtered_df):
