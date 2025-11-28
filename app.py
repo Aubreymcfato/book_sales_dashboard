@@ -1,4 +1,3 @@
-# app.py → FINAL VERSION – NO MORE CRASHES, NO MORE JS ERRORS
 import streamlit as st
 import pandas as pd
 import altair as alt
@@ -72,13 +71,10 @@ with tab1:
         st.warning("Nessun dato con i filtri selezionati.")
         st.stop()
 
-    # Forza units a numero intero (evita problemi Arrow + download)
     filtered_df = filtered_df.copy()
     filtered_df["units"] = pd.to_numeric(filtered_df["units"], errors="coerce").fillna(0).astype(int)
 
-    # ==================== DOWNLOAD CSV SICURO ====================
     def get_csv_bytes(df):
-        # Forza tutto a stringa, sostituisci valori problematici, UTF-8 puro
         df_clean = df.copy()
         df_clean = df_clean.fillna("")
         df_clean = df_clean.astype(str)
@@ -103,12 +99,10 @@ with tab1:
             use_container_width=True
         )
 
-    # Metriche rapide
     if any(filters.values()):
         total_units = filtered_df["units"].sum()
         st.metric("Unità totali visibili", f"{total_units:,}")
 
-    # Grafici
     st.subheader("Top")
     c1, c2, c3 = st.columns(3)
     with c1:
@@ -121,7 +115,6 @@ with tab1:
         ch = create_top_publishers_chart(filtered_df)
         if ch: st.altair_chart(ch, use_container_width=True)
 
-    # Andamento settimanale (solo quando "Tutti")
     if is_all_weeks and any(f for f in [filters.get("title"), filters.get("author"), filters.get("publisher")]):
         st.subheader("Andamento settimanale")
         trend = []
@@ -178,17 +171,16 @@ with tab2:
     adelphi = pd.concat(adelphi_weeks, ignore_index=True)
     adelphi["title"] = adelphi["title"].apply(normalize_title)
 
-    # Filtri Adelphi (riutilizza quelli globali se presenti)
+    # Applica i filtri globali anche qui
     for col in ["title", "collana"]:
-        if filters.get(col) and adelphi = adelphi[adelphi[col].isin(filters[col])]
+        if filters.get(col):
+            adelphi = adelphi[adelphi[col].isin(filters[col])]
 
-    # Raggruppa per titolo (+ collana se esiste)
     group_cols = ["title", "Settimana", "Week_Num"]
     if "collana" in adelphi.columns:
         group_cols.insert(1, "collana")
     adelphi = adelphi.groupby(group_cols)["units"].sum().reset_index()
 
-    # Calcolo variazione %
     key_cols = ["title"] + (["collana"] if "collana" in group_cols else [])
     adelphi["prev"] = adelphi.groupby(key_cols)["units"].shift(1)
     adelphi["Diff_%"] = adelphi.apply(
@@ -196,13 +188,12 @@ with tab2:
         axis=1
     )
 
-    # Heatmap
     idx = "title"
     if "collana" in adelphi.columns:
         adelphi["title_collana"] = adelphi["title"] + " (" + adelphi["collana"].fillna("—") + ")"
         idx = "title_collana"
 
-    long = adelphi.pivot(index=idx, columns="Settimana", values="Diff_%").stack().reset_index()
+    long = adelphi.pivot(index=idx, columns="Settimana", values="Diff_%").stack(dropna=False).reset_index()
     long = long.rename(columns={0: "Diff_%"})
     long = long.merge(adelphi[["Settimana", "Week_Num"]].drop_duplicates(), on="Settimana")
 
@@ -212,8 +203,11 @@ with tab2:
     else:
         st.info("Nessuna variazione calcolabile con i dati attuali.")
 
+    display_cols = ["title", "Settimana", "units", "Diff_%"]
+    if "collana" in adelphi.columns:
+        display_cols.insert(1, "collana")
     st.dataframe(
-        adelphi[["title", "collana", "Settimana", "units", "Diff_%"]].sort_values(["title", "Week_Num"]),
+        adelphi[display_cols].sort_values(["title", "Week_Num"]),
         use_container_width=True
     )
 
