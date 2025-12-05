@@ -1,4 +1,4 @@
-# app.py → VERSIONE DEFINITIVA – VELOCE, STABILE, ZERO CRASH
+# app.py – VERSIONE FINALE, SENZA ERRORI
 import streamlit as st
 import pandas as pd
 import altair as alt
@@ -26,7 +26,6 @@ df_all = load_master()
 st.set_page_config(page_title="Dashboard Vendite Libri", layout="wide")
 st.title("Dashboard Vendite Libri")
 
-# Stile
 st.markdown("""
 <style>
     .big-font {font-size:18px !important; font-weight:bold;}
@@ -39,11 +38,9 @@ st.markdown("""
 # ================================================
 st.sidebar.header("Filtri")
 
-# Lista settimane disponibili
 week_options = ["Tutti"] + sorted(df_all["week"].unique().tolist())
 selected_week = st.sidebar.selectbox("Settimana", week_options, index=0)
 
-# Filtri classici
 filters = {}
 for col, label in [
     ("publisher", "Editore"),
@@ -58,19 +55,17 @@ for col, label in [
         if "Tutti" not in chosen and chosen:
             filters[col] = chosen
 
-# Pulsante reset
 if st.sidebar.button("Reimposta tutti i filtri"):
     st.query_params.clear()
     st.rerun()
 
 # ================================================
-# APPLICAZIONE FILTRO SETTIMANA
+# DATI FILTRATI
 # ================================================
 df = df_all.copy()
 if selected_week != "Tutti":
     df = df[df["week"] == selected_week]
 
-# Applica filtri utente
 for col, vals in filters.items():
     df = df[df[col].isin(vals)]
 
@@ -79,19 +74,18 @@ if df.empty:
     st.stop()
 
 # ================================================
-# DOWNLOAD CSV (sicuro al 100%)
+# DOWNLOAD CSV (sicuro)
 # ================================================
 @st.cache_data
-def convert_df_to_csv(_df):
+def convert_to_csv(_df):
     return _df.to_csv(index=False).encode('utf-8')
 
-csv_data = convert_df_to_csv(df)
+csv_data = convert_to_csv(df)
 
 col1, col2 = st.columns([4, 1])
 with col1:
     st.subheader(f"Dati – {selected_week}")
-    # Nascondi colonne inutili
-    display_df = df.drop(columns=["source_file", "rank"], errors="ignore")
+    display_df = df.drop(columns=["rank", "source_file"], errors="ignore")
     st.dataframe(display_df, use_container_width=True)
 
 with col2:
@@ -104,7 +98,7 @@ with col2:
     )
 
 # ================================================
-# METRICHE RAPIDE
+# METRICHE
 # ================================================
 if any(filters.values()):
     total = df["units"].sum()
@@ -121,8 +115,8 @@ with c1:
     top_books = df.nlargest(20, "units")[["title", "units"]]
     if len(top_books) > 1:
         ch = alt.Chart(top_books).mark_bar(color="#0068c9").encode(
-            x=alt.X("title:N", sort="-y", title="Titolo"),
-            y=alt.Y("units:Q", title="Unità"),
+            x=alt.X("title:N", sort="-y"),
+            y=alt.Y("units:Q"),
             tooltip=["title", "units"]
         ).properties(height=400)
         st.altair_chart(ch, use_container_width=True)
@@ -131,8 +125,8 @@ with c2:
     top_authors = df.groupby("author")["units"].sum().nlargest(10).reset_index()
     if len(top_authors) > 1:
         ch = alt.Chart(top_authors).mark_bar(color="#e67e22").encode(
-            x=alt.X("author:N", sort="-y", title="Autore"),
-            y=alt.Y("units:Q", title="Unità"),
+            x=alt.X("author:N", sort="-y"),
+            y=alt.Y("units:Q"),
             tooltip=["author", "units"]
         ).properties(height=400)
         st.altair_chart(ch, use_container_width=True)
@@ -141,19 +135,19 @@ with c3:
     top_publishers = df.groupby("publisher")["units"].sum().nlargest(10).reset_index()
     if len(top_publishers) > 1:
         ch = alt.Chart(top_publishers).mark_bar(color="#27ae60").encode(
-            x=alt.X("publisher:N", sort="-y", title="Editore"),
-            y=alt.Y("units:Q", title="Unità"),
+            x=alt.X("publisher:N", sort="-y"),
+            y=alt.Y("units:Q"),
             tooltip=["publisher", "units"]
         ).properties(height=400)
         st.altair_chart(ch, use_container_width=True)
 
 # ================================================
-# ANDAMENTO SETTIMANALE (solo su "Tutti")
+# ANDAMENTO SETTIMANALE
 # ================================================
 if selected_week == "Tutti" and any(f for f in [filters.get("title"), filters.get("author"), filters.get("publisher")]):
     st.subheader("Andamento Settimanale")
     trend = []
-    for week_name in week_options[1:]:  # esclude "Tutti"
+    for week_name in week_options[1:]:
         temp = df_all[df_all["week"] == week_name].copy()
         if filters.get("title"):
             temp = temp[temp["title"].isin(filters["title"])]
@@ -176,14 +170,14 @@ if selected_week == "Tutti" and any(f for f in [filters.get("title"), filters.ge
             y="Unità:Q",
             color="Tipo:N",
             tooltip=["Settimana", "Unità", "Tipo"]
-        )
         ).properties(height=400)
         st.altair_chart(chart, use_container_width=True)
 
 # ================================================
-# ANALISI ADELPHI – Heatmap
+# ANALISI ADELPHI
 # ================================================
 st.header("Analisi Variazioni % – Adelphi")
+
 adelphi = df_all[df_all["publisher"].str.contains("Adelphi", case=False, na=False)].copy()
 
 if adelphi.empty:
@@ -192,7 +186,7 @@ else:
     # Pulizia
     adelphi["units"] = pd.to_numeric(adelphi["units"], errors="coerce").fillna(0)
 
-    # Applica eventuali filtri titolo/collana
+    # Filtri
     for col in ["title", "collana"]:
         if filters.get(col):
             adelphi = adelphi[adelphi[col].isin(filters[col])]
@@ -206,10 +200,9 @@ else:
     # Variazione %
     key = ["title"] + (["collana"] if "collana" in grp else [])
     adelphi["prev"] = adelphi.groupby(key)["units"].shift(1)
-    adelphi["Diff_%"] = np.where(
-        adelphi["prev"] > 0,
-        (adelphi["units"] - adelphi["prev"]) / adelphi["prev"] * 100,
-        np.nan
+    adelphi["Diff_%"] = adelphi.apply(
+        lambda r: (r["units"] - r["prev"]) / r["prev"] * 100 if pd.notna(r["prev"]) and r["prev"] > 0 else None,
+        axis=1
     )
 
     # Heatmap
@@ -220,6 +213,7 @@ else:
 
     pivot = adelphi.pivot(index=idx, columns="week", values="Diff_%").fillna(0)
     long = pivot.reset_index().melt(id_vars=idx, var_name="week", value_name="Diff_%")
+    long = long.merge(adelphi[["week", "Week_Num"]].drop_duplicates(), on="week", how="left")
 
     if not long.empty:
         chart = alt.Chart(long).mark_rect().encode(
@@ -230,8 +224,12 @@ else:
         ).properties(width=800, height=600)
         st.altair_chart(chart, use_container_width=True)
     else:
-        st.info("Nessuna variazione da mostrare.")
+        st.info("Nessuna variazione calcolabile.")
 
-    st.dataframe(adelphi[["title", "collana", "week", "units", "Diff_%"]].sort_values(["title", "week"]))
+    # Tabella finale
+    show = ["title", "week", "units", "Diff_%"]
+    if "collana" in adelphi.columns:
+        show.insert(1, "collana")
+    st.dataframe(adelphi[show].sort_values(["title", "week"]))
 
-st.success("Dashboard aggiornata – tutto veloce e stabile!")
+st.success("Dashboard aggiornata – tutto stabile e veloce!")
