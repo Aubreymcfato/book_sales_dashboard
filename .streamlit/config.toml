@@ -2,5 +2,6 @@
 enableCORS = false
 enableXsrfProtection = false
 
+# Esegue create_parquet.py ad ogni deploy
 [deploys]
-runOnSave = "python update_master.py"
+runOnSave = "python create_parquet.py"
