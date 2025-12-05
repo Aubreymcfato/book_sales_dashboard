@@ -1,0 +1,8 @@
+[server]
+enableCORS = false
+enableXsrfProtection = false
+
+[deploys]
+#]
+# Questo fa eseguire update_master.py ad ogni push
+runOnSave = "python update_master.py"
