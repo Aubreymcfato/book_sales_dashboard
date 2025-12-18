@@ -1,4 +1,4 @@
-# app.py → VERSIONE FINALE – SOLO HEATMAP RESA MOLTO ALTA E LEGGIBILE (rettangoli alti, tutti visibili)
+# app.py → VERSIONE FINALE – HEATMAP MODIFICATA + NUOVA TAB STREAK
 import streamlit as st
 import pandas as pd
 import altair as alt
@@ -66,10 +66,10 @@ df_all = load_master()
 st.set_page_config(page_title="Dashboard Vendite Libri", layout="wide")
 st.title("Dashboard Vendite Libri")
 
-tab_principale, tab_adelphi = st.tabs(["Principale", "Analisi Adelphi"])
+tab_principale, tab_adelphi, tab_streak = st.tabs(["Principale", "Analisi Adelphi", "Streak Adelphi"])
 
 # ===================================================================
-# TAB PRINCIPALE (nessuna modifica)
+# TAB PRINCIPALE (invariata)
 # ===================================================================
 with tab_principale:
     week_options = ["Tutti"] + sorted(df_all["week"].unique(), key=lambda x: int(x.split()[-1]))
@@ -169,7 +169,7 @@ with tab_principale:
                 ).properties(height=600), use_container_width=True)
 
 # ===================================================================
-# TAB ANALISI ADELPHI – HEATMAP RESA MOLTO ALTA E LEGGIBILE
+# TAB ANALISI ADELPHI – HEATMAP % (rettangoli 30% più bassi, ma ancora leggibili)
 # ===================================================================
 with tab_adelphi:
     st.header("Analisi Variazioni Settimanali – Adelphi")
@@ -207,33 +207,99 @@ with tab_adelphi:
         long = long.merge(adelphi[[idx, "week", "units"]], on=[idx, "week"], how="left")
 
         if not long.empty:
-            # Calcola altezza dinamica: 45px per ogni libro → rettangoli alti e tutti visibili senza schiacciamento
             num_books = long[idx].nunique()
-            dynamic_height = max(800, num_books * 45)  # minimo 800px, poi cresce
+            dynamic_height = max(800, num_books * 31)  # 30% più basso di 45px → ~31px per libro
 
             chart = alt.Chart(long).mark_rect(
-                stroke='gray',  # bordo sottile per separare meglio i rettangoli
+                stroke='gray',
                 strokeWidth=0.5
             ).encode(
                 x=alt.X("week:N", sort=week_options[1:], title="Settimana"),
-                y=alt.Y(f"{idx}:N", sort=alt.EncodingSortField(field="units", op="sum", order="descending"), title="Libro"),
+                y=alt.Y(f"{idx}:N", sort=alt.EncodingSortField(field="units", op="sum", order="descending")),
                 color=alt.Color("Diff_%:Q", scale=alt.Scale(scheme="redyellowgreen", domainMid=0), title="Variazione %"),
-                tooltip=[
-                    idx,
-                    "week",
-                    alt.Tooltip("units:Q", title="Unità vendute"),
-                    alt.Tooltip("Diff_%:Q", format=".1f", title="Variazione %")
-                ]
+                tooltip=[idx, "week", alt.Tooltip("units:Q", title="Unità vendute"), alt.Tooltip("Diff_%:Q", format=".1f", title="Variazione %")]
             ).properties(
                 width=900,
                 height=dynamic_height
-            ).configure_axis(
-                labelFontSize=12,
-                titleFontSize=14
-            )
+            ).configure_axis(labelFontSize=12, titleFontSize=14)
 
             st.altair_chart(chart, use_container_width=True)
 
         st.dataframe(adelphi[["title","collana","week","units","Diff_%"]].sort_values(["title","week"]))
+
+# ===================================================================
+# NUOVA TAB STREAK – HEATMAP VERDE/ROSSO/BIANCO + CLASSIFICA STREAK
+# ===================================================================
+with tab_streak:
+    st.header("Streak Adelphi – Crescita/Declino Continuo")
+
+    streak_data = df_all[df_all["publisher"].str.contains("Adelphi", case=False, na=False)].copy()
+    if streak_data.empty:
+        st.info("Nessun dato Adelphi trovato.")
+    else:
+        streak_data["units"] = pd.to_numeric(streak_data["units"], errors="coerce").fillna(0)
+
+        # Applica filtri
+        for col in ["title", "collana"]:
+            if filters.get(col):
+                streak_data = streak_data[streak_data[col].isin(filters[col])]
+
+        grp = ["title", "week"]
+        if "collana" in streak_data.columns:
+            grp.insert(1, "collana")
+        streak_data = streak_data.groupby(grp)["units"].sum().reset_index()
+
+        key = ["title"] + (["collana"] if "collana" in grp else [])
+        streak_data = streak_data.sort_values(["title"] + (["collana"] if "collana" in grp else []) + ["week"])
+        streak_data["diff"] = streak_data.groupby(key)["units"].diff()
+
+        # Colore: verde >0, rosso <0, bianco =0
+        streak_data["color"] = np.where(streak_data["diff"] > 0, "green",
+                              np.where(streak_data["diff"] < 0, "red", "white"))
+
+        idx = "title"
+        if "collana" in streak_data.columns:
+            streak_data["title_collana"] = streak_data["title"] + " (" + streak_data["collana"].fillna("—") + ")"
+            idx = "title_collana"
+
+        pivot_color = streak_data.pivot(index=idx, columns="week", values="color").fillna("white")
+        long_color = pivot_color.reset_index().melt(id_vars=idx, var_name="week", value_name="color")
+        long_color = long_color.merge(streak_data[[idx, "week", "units"]], on=[idx, "week"], how="left")
+
+        if not long_color.empty:
+            num_books = long_color[idx].nunique()
+            dynamic_height = max(800, num_books * 31)
+
+            chart_streak = alt.Chart(long_color).mark_rect(
+                stroke='gray',
+                strokeWidth=0.5
+            ).encode(
+                x=alt.X("week:N", sort=week_options[1:], title="Settimana"),
+                y=alt.Y(f"{idx}:N", sort=alt.EncodingSortField(field="units", op="sum", order="descending")),
+                color=alt.Color("color:N", scale=alt.Scale(domain=["green","white","red"], range=["green","white","red"]), legend=None),
+                tooltip=[idx, "week", alt.Tooltip("units:Q", title="Unità vendute")]
+            ).properties(
+                width=900,
+                height=dynamic_height
+            )
+
+            st.altair_chart(chart_streak, use_container_width=True)
+
+        # Classifica Streak positive (Top 20)
+        st.subheader("Top 20 Streak Positive (settimane consecutive di crescita)")
+        streak_calc = streak_data.copy()
+        streak_calc["is_up"] = (streak_calc["diff"] > 0).astype(int)
+        streak_calc["streak_group"] = (streak_calc["is_up"] != streak_calc["is_up"].shift()).cumsum()
+        streaks = streak_calc[streak_calc["is_up"] == 1].groupby(["title_collana" if "title_collana" in streak_calc else "title", "streak_group"]).agg(
+            streak_length=("week", "count"),
+            last_units=("units", "last"),
+            last_week=("week", "last")
+        ).reset_index()
+        streaks = streaks.sort_values("streak_length", ascending=False).head(20)
+
+        if not streaks.empty:
+            st.dataframe(streaks[["title_collana" if "title_collana" in streaks else "title", "streak_length", "last_units", "last_week"]])
+        else:
+            st.info("Nessuna streak positiva trovata.")
 
 st.success("Dashboard aggiornata – tutto perfetto!")
