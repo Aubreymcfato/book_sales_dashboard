@@ -1,4 +1,4 @@
-# app.py → VERSIONE FINALE – HEATMAP MODIFICATA + NUOVA TAB STREAK
+# app.py → VERSIONE FINALE – HEATMAP 20PX, STREAK TOP SOPRA, NUOVE TAB ADELPHI INSIGHT + FATTURATO
 import streamlit as st
 import pandas as pd
 import altair as alt
@@ -31,6 +31,14 @@ if not os.path.exists(MASTER_PATH):
             if not units_col: continue
             df = df.rename(columns={units_col: "units"})
 
+            # Aggiungiamo prezzo e fatturato se esiste
+            price_col = next((c for c in ["price","prezzo","prezzo_copertina"] if c in df.columns), None)
+            if price_col:
+                df = df.rename(columns={price_col: "price"})
+                df["fatturato"] = df["units"] * df["price"]
+            else:
+                df["fatturato"] = 0
+
             df["week"] = f"Settimana {week_num.zfill(2)}"
 
             for col in ["collana","collection","series","collection/series"]:
@@ -38,7 +46,7 @@ if not os.path.exists(MASTER_PATH):
                     df = df.rename(columns={col: "collana"})
                     break
 
-            keep = ["title","author","publisher","units","week"]
+            keep = ["title","author","publisher","units","fatturato","week"]
             if "collana" in df.columns: keep.append("collana")
             dfs.append(df[keep])
         except Exception as e:
@@ -46,6 +54,7 @@ if not os.path.exists(MASTER_PATH):
 
     master = pd.concat(dfs, ignore_index=True)
     master["units"] = pd.to_numeric(master["units"], errors="coerce").fillna(0).astype(int)
+    master["fatturato"] = pd.to_numeric(master["fatturato"], errors="coerce").fillna(0)
     master["title"] = master["title"].astype(str).str.strip()
     master["publisher"] = master["publisher"].astype(str).str.strip().str.title()
     if "collana" in master.columns:
@@ -66,7 +75,13 @@ df_all = load_master()
 st.set_page_config(page_title="Dashboard Vendite Libri", layout="wide")
 st.title("Dashboard Vendite Libri")
 
-tab_principale, tab_adelphi, tab_streak = st.tabs(["Principale", "Analisi Adelphi", "Streak Adelphi"])
+tab_principale, tab_adelphi, tab_streak, tab_insight_adelphi, tab_fatturato_adelphi = st.tabs([
+    "Principale", 
+    "Analisi Adelphi", 
+    "Streak Adelphi", 
+    "Insight Adelphi (Vendite)", 
+    "Insight Adelphi (Fatturato)"
+])
 
 # ===================================================================
 # TAB PRINCIPALE (invariata)
@@ -169,7 +184,7 @@ with tab_principale:
                 ).properties(height=600), use_container_width=True)
 
 # ===================================================================
-# TAB ANALISI ADELPHI – HEATMAP % (rettangoli 30% più bassi, ma ancora leggibili)
+# TAB ANALISI ADELPHI – HEATMAP % (rettangoli 20px)
 # ===================================================================
 with tab_adelphi:
     st.header("Analisi Variazioni Settimanali – Adelphi")
@@ -208,7 +223,7 @@ with tab_adelphi:
 
         if not long.empty:
             num_books = long[idx].nunique()
-            dynamic_height = max(800, num_books * 31)  # 30% più basso di 45px → ~31px per libro
+            dynamic_height = max(600, num_books * 20)  # 20px per libro
 
             chart = alt.Chart(long).mark_rect(
                 stroke='gray',
@@ -221,14 +236,14 @@ with tab_adelphi:
             ).properties(
                 width=900,
                 height=dynamic_height
-            ).configure_axis(labelFontSize=12, titleFontSize=14)
+            ).configure_axis(labelFontSize=11, titleFontSize=13)
 
             st.altair_chart(chart, use_container_width=True)
 
         st.dataframe(adelphi[["title","collana","week","units","Diff_%"]].sort_values(["title","week"]))
 
 # ===================================================================
-# NUOVA TAB STREAK – HEATMAP VERDE/ROSSO/BIANCO + CLASSIFICA STREAK
+# TAB STREAK ADELPHI – CLASSIFICA SOPRA + HEATMAP VERDE/ROSSO/BIANCO (20px)
 # ===================================================================
 with tab_streak:
     st.header("Streak Adelphi – Crescita/Declino Continuo")
@@ -239,7 +254,6 @@ with tab_streak:
     else:
         streak_data["units"] = pd.to_numeric(streak_data["units"], errors="coerce").fillna(0)
 
-        # Applica filtri
         for col in ["title", "collana"]:
             if filters.get(col):
                 streak_data = streak_data[streak_data[col].isin(filters[col])]
@@ -250,10 +264,9 @@ with tab_streak:
         streak_data = streak_data.groupby(grp)["units"].sum().reset_index()
 
         key = ["title"] + (["collana"] if "collana" in grp else [])
-        streak_data = streak_data.sort_values(["title"] + (["collana"] if "collana" in grp else []) + ["week"])
+        streak_data = streak_data.sort_values(key + ["week"])
         streak_data["diff"] = streak_data.groupby(key)["units"].diff()
 
-        # Colore: verde >0, rosso <0, bianco =0
         streak_data["color"] = np.where(streak_data["diff"] > 0, "green",
                               np.where(streak_data["diff"] < 0, "red", "white"))
 
@@ -262,13 +275,31 @@ with tab_streak:
             streak_data["title_collana"] = streak_data["title"] + " (" + streak_data["collana"].fillna("—") + ")"
             idx = "title_collana"
 
+        # TOP 20 STREAK SOPRA LA HEATMAP
+        st.subheader("Top 20 Streak Positive (settimane consecutive di crescita)")
+        streak_calc = streak_data.copy()
+        streak_calc["is_up"] = (streak_calc["diff"] > 0).astype(int)
+        streak_calc["streak_group"] = (streak_calc["is_up"] != streak_calc["is_up"].shift()).cumsum()
+        streaks = streak_calc[streak_calc["is_up"] == 1].groupby([idx, "streak_group"]).agg(
+            streak_length=("week", "count"),
+            last_units=("units", "last"),
+            last_week=("week", "last")
+        ).reset_index()
+        streaks = streaks.sort_values("streak_length", ascending=False).head(20)
+
+        if not streaks.empty:
+            st.dataframe(streaks[[idx, "streak_length", "last_units", "last_week"]])
+        else:
+            st.info("Nessuna streak positiva trovata.")
+
+        # HEATMAP VERDE/ROSSO/BIANCO (20px)
         pivot_color = streak_data.pivot(index=idx, columns="week", values="color").fillna("white")
         long_color = pivot_color.reset_index().melt(id_vars=idx, var_name="week", value_name="color")
         long_color = long_color.merge(streak_data[[idx, "week", "units"]], on=[idx, "week"], how="left")
 
         if not long_color.empty:
             num_books = long_color[idx].nunique()
-            dynamic_height = max(800, num_books * 31)
+            dynamic_height = max(600, num_books * 20)  # 20px per libro
 
             chart_streak = alt.Chart(long_color).mark_rect(
                 stroke='gray',
@@ -285,21 +316,94 @@ with tab_streak:
 
             st.altair_chart(chart_streak, use_container_width=True)
 
-        # Classifica Streak positive (Top 20)
-        st.subheader("Top 20 Streak Positive (settimane consecutive di crescita)")
-        streak_calc = streak_data.copy()
-        streak_calc["is_up"] = (streak_calc["diff"] > 0).astype(int)
-        streak_calc["streak_group"] = (streak_calc["is_up"] != streak_calc["is_up"].shift()).cumsum()
-        streaks = streak_calc[streak_calc["is_up"] == 1].groupby(["title_collana" if "title_collana" in streak_calc else "title", "streak_group"]).agg(
-            streak_length=("week", "count"),
-            last_units=("units", "last"),
-            last_week=("week", "last")
-        ).reset_index()
-        streaks = streaks.sort_values("streak_length", ascending=False).head(20)
+# ===================================================================
+# TAB INSIGHT ADELPHI (VENDITE)
+# ===================================================================
+with tab_insight_adelphi:
+    st.header("Insight Adelphi – Vendite")
 
-        if not streaks.empty:
-            st.dataframe(streaks[["title_collana" if "title_collana" in streaks else "title", "streak_length", "last_units", "last_week"]])
-        else:
-            st.info("Nessuna streak positiva trovata.")
+    insight = df_all[df_all["publisher"].str.contains("Adelphi", case=False, na=False)].copy()
+    if insight.empty:
+        st.info("Nessun dato Adelphi.")
+    else:
+        insight["units"] = pd.to_numeric(insight["units"], errors="coerce").fillna(0)
+
+        for col in ["title", "collana"]:
+            if filters.get(col):
+                insight = insight[insight[col].isin(filters[col])]
+
+        # Top 20 libri
+        st.subheader("Top 20 Libri più venduti")
+        top_libri = insight.groupby("title")["units"].sum().nlargest(20).reset_index()
+        st.altair_chart(alt.Chart(top_libri).mark_bar().encode(x=alt.X("title:N",sort="-y"),y="units:Q"), use_container_width=True)
+
+        # Top 20 autori
+        st.subheader("Top 20 Autori più venduti")
+        top_autori = insight.groupby("author")["units"].sum().nlargest(20).reset_index()
+        st.altair_chart(alt.Chart(top_autori).mark_bar().encode(x=alt.X("author:N",sort="-y"),y="units:Q"), use_container_width=True)
+
+        # Pie Collane
+        if "collana" in insight.columns:
+            st.subheader("Distribuzione Vendite per Collana")
+            pie_collana = insight.groupby("collana")["units"].sum().reset_index()
+            pie_collana = pie_collana[pie_collana["units"] > 0]
+            st.altair_chart(alt.Chart(pie_collana).mark_arc().encode(
+                theta="units:Q",
+                color="collana:N",
+                tooltip=["collana", "units"]
+            ).properties(height=400), use_container_width=True)
+
+        # Insight aggiuntivo: Trend vendite Adelphi totale
+        st.subheader("Trend Vendite Totali Adelphi")
+        trend_total = insight.groupby("week")["units"].sum().reset_index()
+        st.altair_chart(alt.Chart(trend_total).mark_line(point=True).encode(
+            x=alt.X("week:N", sort=week_options[1:]),
+            y="units:Q"
+        ).properties(height=400), use_container_width=True)
+
+# ===================================================================
+# TAB FATTURATO ADELPHI
+# ===================================================================
+with tab_fatturato_adelphi:
+    st.header("Insight Adelphi – Fatturato")
+
+    fatt = df_all[df_all["publisher"].str.contains("Adelphi", case=False, na=False)].copy()
+    if fatt.empty:
+        st.info("Nessun dato Adelphi.")
+    else:
+        fatt["fatturato"] = pd.to_numeric(fatt["fatturato"], errors="coerce").fillna(0)
+
+        for col in ["title", "collana"]:
+            if filters.get(col):
+                fatt = fatt[fatt[col].isin(filters[col])]
+
+        # Top 20 libri per fatturato
+        st.subheader("Top 20 Libri per Fatturato")
+        top_fatt_libri = fatt.groupby("title")["fatturato"].sum().nlargest(20).reset_index()
+        st.altair_chart(alt.Chart(top_fatt_libri).mark_bar().encode(x=alt.X("title:N",sort="-y"),y="fatturato:Q"), use_container_width=True)
+
+        # Top 20 autori per fatturato
+        st.subheader("Top 20 Autori per Fatturato")
+        top_fatt_autori = fatt.groupby("author")["fatturato"].sum().nlargest(20).reset_index()
+        st.altair_chart(alt.Chart(top_fatt_autori).mark_bar().encode(x=alt.X("author:N",sort="-y"),y="fatturato:Q"), use_container_width=True)
+
+        # Pie Collane per fatturato
+        if "collana" in fatt.columns:
+            st.subheader("Distribuzione Fatturato per Collana")
+            pie_fatt_collana = fatt.groupby("collana")["fatturato"].sum().reset_index()
+            pie_fatt_collana = pie_fatt_collana[pie_fatt_collana["fatturato"] > 0]
+            st.altair_chart(alt.Chart(pie_fatt_collana).mark_arc().encode(
+                theta="fatturato:Q",
+                color="collana:N",
+                tooltip=["collana", "fatturato"]
+            ).properties(height=400), use_container_width=True)
+
+        # Trend fatturato totale
+        st.subheader("Trend Fatturato Totale Adelphi")
+        trend_fatt = fatt.groupby("week")["fatturato"].sum().reset_index()
+        st.altair_chart(alt.Chart(trend_fatt).mark_line(point=True).encode(
+            x=alt.X("week:N", sort=week_options[1:]),
+            y="fatturato:Q"
+        ).properties(height=400), use_container_width=True)
 
 st.success("Dashboard aggiornata – tutto perfetto!")
