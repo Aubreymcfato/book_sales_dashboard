@@ -1,4 +1,4 @@
-# app.py → VERSIONE FINALE – ALTA HEATMAP, FILTRO MULTIPLO PERFETTO, LINE CHART AVANZATE
+# app.py → VERSIONE FINALE – SOLO HEATMAP RESA MOLTO ALTA E LEGGIBILE (rettangoli alti, tutti visibili)
 import streamlit as st
 import pandas as pd
 import altair as alt
@@ -69,7 +69,7 @@ st.title("Dashboard Vendite Libri")
 tab_principale, tab_adelphi = st.tabs(["Principale", "Analisi Adelphi"])
 
 # ===================================================================
-# TAB PRINCIPALE
+# TAB PRINCIPALE (nessuna modifica)
 # ===================================================================
 with tab_principale:
     week_options = ["Tutti"] + sorted(df_all["week"].unique(), key=lambda x: int(x.split()[-1]))
@@ -87,11 +87,9 @@ with tab_principale:
     if st.sidebar.button("Reimposta filtri"):
         st.rerun()
 
-    # Applica tutti i filtri combinati
     df = df_all.copy()
     if selected_week != "Tutti":
         df = df[df["week"] == selected_week]
-
     for col, vals in filters.items():
         df = df[df[col].isin(vals)]
 
@@ -99,7 +97,6 @@ with tab_principale:
         st.warning("Nessun dato con i filtri selezionati.")
         st.stop()
 
-    # Download
     csv = df.to_csv(index=False).encode()
     c1, c2 = st.columns([4,1])
     with c1:
@@ -108,7 +105,6 @@ with tab_principale:
     with c2:
         st.download_button("Scarica CSV", csv, f"vendite_{selected_week}.csv", "text/csv")
 
-    # Top – filtrati
     st.subheader("Top – Totali filtrati")
     c1,c2,c3 = st.columns(3)
     with c1:
@@ -121,11 +117,8 @@ with tab_principale:
         top = df.groupby("publisher")["units"].sum().nlargest(10).reset_index()
         st.altair_chart(alt.Chart(top).mark_bar().encode(x=alt.X("publisher:N",sort="-y"),y="units:Q"), use_container_width=True)
 
-    # Line chart avanzate (solo su "Tutti")
     if selected_week == "Tutti" and any(filters.values()):
         st.subheader("Andamento Settimanale")
-
-        # Grafico cumulativo per filtro principale (autore/editore/collana)
         trend_cum = []
         filter_type = None
         filter_values = None
@@ -153,7 +146,6 @@ with tab_principale:
                     tooltip=["Settimana", "Unità", "Item"]
                 ).properties(height=500), use_container_width=True)
 
-        # Grafico per singolo libro (se filtro autore o collana)
         if filters.get("author") or filters.get("collana"):
             trend_books = []
             for w in week_options[1:]:
@@ -177,7 +169,7 @@ with tab_principale:
                 ).properties(height=600), use_container_width=True)
 
 # ===================================================================
-# TAB ANALISI ADELPHI – HEATMAP MOLTO ALTA
+# TAB ANALISI ADELPHI – HEATMAP RESA MOLTO ALTA E LEGGIBILE
 # ===================================================================
 with tab_adelphi:
     st.header("Analisi Variazioni Settimanali – Adelphi")
@@ -188,7 +180,6 @@ with tab_adelphi:
     else:
         adelphi["units"] = pd.to_numeric(adelphi["units"], errors="coerce").fillna(0)
 
-        # Applica filtri
         for col in ["title", "collana"]:
             if filters.get(col):
                 adelphi = adelphi[adelphi[col].isin(filters[col])]
@@ -216,12 +207,31 @@ with tab_adelphi:
         long = long.merge(adelphi[[idx, "week", "units"]], on=[idx, "week"], how="left")
 
         if not long.empty:
-            chart = alt.Chart(long).mark_rect().encode(
+            # Calcola altezza dinamica: 45px per ogni libro → rettangoli alti e tutti visibili senza schiacciamento
+            num_books = long[idx].nunique()
+            dynamic_height = max(800, num_books * 45)  # minimo 800px, poi cresce
+
+            chart = alt.Chart(long).mark_rect(
+                stroke='gray',  # bordo sottile per separare meglio i rettangoli
+                strokeWidth=0.5
+            ).encode(
                 x=alt.X("week:N", sort=week_options[1:], title="Settimana"),
-                y=alt.Y(f"{idx}:N", sort=alt.EncodingSortField(field="units", op="sum", order="descending")),
+                y=alt.Y(f"{idx}:N", sort=alt.EncodingSortField(field="units", op="sum", order="descending"), title="Libro"),
                 color=alt.Color("Diff_%:Q", scale=alt.Scale(scheme="redyellowgreen", domainMid=0), title="Variazione %"),
-                tooltip=[idx, "week", alt.Tooltip("units:Q", title="Unità vendute"), alt.Tooltip("Diff_%:Q", format=".1f", title="Variazione %")]
-            ).properties(width=900, height=1500)  # ← MOLTO ALTA COME ALL'INIZIO
+                tooltip=[
+                    idx,
+                    "week",
+                    alt.Tooltip("units:Q", title="Unità vendute"),
+                    alt.Tooltip("Diff_%:Q", format=".1f", title="Variazione %")
+                ]
+            ).properties(
+                width=900,
+                height=dynamic_height
+            ).configure_axis(
+                labelFontSize=12,
+                titleFontSize=14
+            )
+
             st.altair_chart(chart, use_container_width=True)
 
         st.dataframe(adelphi[["title","collana","week","units","Diff_%"]].sort_values(["title","week"]))
