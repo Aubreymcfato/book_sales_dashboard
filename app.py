@@ -1,4 +1,4 @@
-# app.py – VERSIONE FINALE, FUNZIONANTE AL 100% – NON ROMPE NIENTE
+# app.py → VERSIONE FINALE – ALTA HEATMAP, FILTRO MULTIPLO PERFETTO, LINE CHART AVANZATE
 import streamlit as st
 import pandas as pd
 import altair as alt
@@ -64,7 +64,7 @@ def load_master():
 df_all = load_master()
 
 st.set_page_config(page_title="Dashboard Vendite Libri", layout="wide")
-st.title("📚 Dashboard Vendite Libri")
+st.title("Dashboard Vendite Libri")
 
 tab_principale, tab_adelphi = st.tabs(["Principale", "Analisi Adelphi"])
 
@@ -87,84 +87,124 @@ with tab_principale:
     if st.sidebar.button("Reimposta filtri"):
         st.rerun()
 
-    # Applica filtri su tutte le settimane
-    df_filtered = df_all.copy()
-    for col, vals in filters.items():
-        df_filtered = df_filtered[df_filtered[col].isin(vals)]
-
+    # Applica tutti i filtri combinati
+    df = df_all.copy()
     if selected_week != "Tutti":
-        df_filtered = df_filtered[df_filtered["week"] == selected_week]
+        df = df[df["week"] == selected_week]
 
-    if df_filtered.empty:
+    for col, vals in filters.items():
+        df = df[df[col].isin(vals)]
+
+    if df.empty:
         st.warning("Nessun dato con i filtri selezionati.")
         st.stop()
 
     # Download
-    csv = df_filtered.to_csv(index=False).encode()
+    csv = df.to_csv(index=False).encode()
     c1, c2 = st.columns([4,1])
     with c1:
         st.subheader(f"Dati – {selected_week}")
-        st.dataframe(df_filtered.drop(columns=["source_file"], errors="ignore"), use_container_width=True)
+        st.dataframe(df.drop(columns=["source_file"], errors="ignore"), use_container_width=True)
     with c2:
         st.download_button("Scarica CSV", csv, f"vendite_{selected_week}.csv", "text/csv")
 
-    # Top – SEMPRE SU TUTTE LE SETTIMANE, filtrati
-    st.subheader("Top – Totali")
+    # Top – filtrati
+    st.subheader("Top – Totali filtrati")
     c1,c2,c3 = st.columns(3)
     with c1:
-        top = df_filtered.nlargest(20,"units")[["title","units"]]
+        top = df.nlargest(20,"units")[["title","units"]]
         st.altair_chart(alt.Chart(top).mark_bar().encode(x=alt.X("title:N",sort="-y"),y="units:Q"), use_container_width=True)
     with c2:
-        top = df_filtered.groupby("author")["units"].sum().nlargest(10).reset_index()
+        top = df.groupby("author")["units"].sum().nlargest(10).reset_index()
         st.altair_chart(alt.Chart(top).mark_bar().encode(x=alt.X("author:N",sort="-y"),y="units:Q"), use_container_width=True)
     with c3:
-        top = df_filtered.groupby("publisher")["units"].sum().nlargest(10).reset_index()
+        top = df.groupby("publisher")["units"].sum().nlargest(10).reset_index()
         st.altair_chart(alt.Chart(top).mark_bar().encode(x=alt.X("publisher:N",sort="-y"),y="units:Q"), use_container_width=True)
 
-    # Andamento settimanale (multiplo)
+    # Line chart avanzate (solo su "Tutti")
     if selected_week == "Tutti" and any(filters.values()):
         st.subheader("Andamento Settimanale")
-        trend = []
-        for w in week_options[1:]:
-            temp = df_all[df_all["week"]==w].copy()
-            for col in ["title","author","publisher","collana"]:
-                if filters.get(col):
-                    temp = temp[temp[col].isin(filters[col])]
-                    label = col.capitalize()
-                    break
-            else:
-                continue
-            units = int(temp["units"].sum())
-            trend.append({"Settimana": w, "Unità": units, "Tipo": label})
-        if trend:
-            st.altair_chart(alt.Chart(pd.DataFrame(trend)).mark_line(point=True).encode(
-                x=alt.X("Settimana:N", sort=week_options[1:]),
-                y="Unità:Q",
-                color="Tipo:N"
-            ).properties(height=500), use_container_width=True)
+
+        # Grafico cumulativo per filtro principale (autore/editore/collana)
+        trend_cum = []
+        filter_type = None
+        filter_values = None
+        for col in ["author", "publisher", "collana", "title"]:
+            if filters.get(col):
+                filter_type = col.capitalize()
+                filter_values = filters[col]
+                break
+
+        if filter_type and filter_values:
+            for w in week_options[1:]:
+                temp = df_all[df_all["week"]==w]
+                for val in filter_values:
+                    temp_val = temp[temp[col] == val]
+                    units = int(temp_val["units"].sum())
+                    trend_cum.append({"Settimana": w, "Unità": units, "Item": val})
+
+            if trend_cum:
+                df_cum = pd.DataFrame(trend_cum)
+                st.subheader(f"Andamento cumulativo per {filter_type}")
+                st.altair_chart(alt.Chart(df_cum).mark_line(point=True).encode(
+                    x=alt.X("Settimana:N", sort=week_options[1:]),
+                    y="Unità:Q",
+                    color="Item:N",
+                    tooltip=["Settimana", "Unità", "Item"]
+                ).properties(height=500), use_container_width=True)
+
+        # Grafico per singolo libro (se filtro autore o collana)
+        if filters.get("author") or filters.get("collana"):
+            trend_books = []
+            for w in week_options[1:]:
+                temp = df_all[df_all["week"]==w]
+                for col, vals in filters.items():
+                    if col in ["author", "collana"]:
+                        temp = temp[temp[col].isin(vals)]
+                for title in temp["title"].unique():
+                    temp_title = temp[temp["title"] == title]
+                    units = int(temp_title["units"].sum())
+                    trend_books.append({"Settimana": w, "Unità": units, "Libro": title})
+
+            if trend_books:
+                df_books = pd.DataFrame(trend_books)
+                st.subheader("Andamento per singolo libro")
+                st.altair_chart(alt.Chart(df_books).mark_line(point=True).encode(
+                    x=alt.X("Settimana:N", sort=week_options[1:]),
+                    y="Unità:Q",
+                    color="Libro:N",
+                    tooltip=["Settimana", "Unità", "Libro"]
+                ).properties(height=600), use_container_width=True)
 
 # ===================================================================
-# TAB ANALISI ADELPHI – HEATMAP
+# TAB ANALISI ADELPHI – HEATMAP MOLTO ALTA
 # ===================================================================
 with tab_adelphi:
     st.header("Analisi Variazioni Settimanali – Adelphi")
+
     adelphi = df_all[df_all["publisher"].str.contains("Adelphi", case=False, na=False)].copy()
     if adelphi.empty:
-        st.info("Nessun dato Adelphi.")
+        st.info("Nessun dato Adelphi trovato.")
     else:
         adelphi["units"] = pd.to_numeric(adelphi["units"], errors="coerce").fillna(0)
-        for col in ["title","collana"]:
+
+        # Applica filtri
+        for col in ["title", "collana"]:
             if filters.get(col):
                 adelphi = adelphi[adelphi[col].isin(filters[col])]
 
-        grp = ["title","week"]
+        grp = ["title", "week"]
         if "collana" in adelphi.columns:
-            grp.insert(1,"collana")
+            grp.insert(1, "collana")
         adelphi = adelphi.groupby(grp)["units"].sum().reset_index()
 
         key = ["title"] + (["collana"] if "collana" in grp else [])
         adelphi["prev"] = adelphi.groupby(key)["units"].shift(1)
-        adelphi["Diff_%"] = np.where(adelphi["prev"]>0, (adelphi["units"]-adelphi["prev"])/adelphi["prev"]*100, np.nan)
+        adelphi["Diff_%"] = np.where(
+            adelphi["prev"] > 0,
+            (adelphi["units"] - adelphi["prev"]) / adelphi["prev"] * 100,
+            np.nan
+        )
 
         idx = "title"
         if "collana" in adelphi.columns:
@@ -177,11 +217,11 @@ with tab_adelphi:
 
         if not long.empty:
             chart = alt.Chart(long).mark_rect().encode(
-                x=alt.X("week:N", sort=week_options[1:]),
-                y=alt.Y(f"{idx}:N", sort=alt.EncodingSortField("units", op="sum", order="descending")),
-                color=alt.Color("Diff_%:Q", scale=alt.Scale(scheme="redyellowgreen", domainMid=0)),
-                tooltip=[idx, "week", alt.Tooltip("units:Q", title="Unità vendute"), alt.Tooltip("Diff_%:Q", format=".1f")]
-            ).properties(width=900, height=1000)
+                x=alt.X("week:N", sort=week_options[1:], title="Settimana"),
+                y=alt.Y(f"{idx}:N", sort=alt.EncodingSortField(field="units", op="sum", order="descending")),
+                color=alt.Color("Diff_%:Q", scale=alt.Scale(scheme="redyellowgreen", domainMid=0), title="Variazione %"),
+                tooltip=[idx, "week", alt.Tooltip("units:Q", title="Unità vendute"), alt.Tooltip("Diff_%:Q", format=".1f", title="Variazione %")]
+            ).properties(width=900, height=1500)  # ← MOLTO ALTA COME ALL'INIZIO
             st.altair_chart(chart, use_container_width=True)
 
         st.dataframe(adelphi[["title","collana","week","units","Diff_%"]].sort_values(["title","week"]))
