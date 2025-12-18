@@ -1,4 +1,4 @@
-# app.py → VERSIONE FINALE – HEATMAP 20PX, STREAK TOP SOPRA, NUOVE TAB ADELPHI INSIGHT + FATTURATO
+# app.py → VERSIONE FINALE – ERRORE FATTURATO RISOLTO (controllo se colonna esiste)
 import streamlit as st
 import pandas as pd
 import altair as alt
@@ -35,6 +35,7 @@ if not os.path.exists(MASTER_PATH):
             price_col = next((c for c in ["price","prezzo","prezzo_copertina"] if c in df.columns), None)
             if price_col:
                 df = df.rename(columns={price_col: "price"})
+                df["price"] = pd.to_numeric(df["price"], errors="coerce").fillna(0)
                 df["fatturato"] = df["units"] * df["price"]
             else:
                 df["fatturato"] = 0
@@ -184,7 +185,7 @@ with tab_principale:
                 ).properties(height=600), use_container_width=True)
 
 # ===================================================================
-# TAB ANALISI ADELPHI – HEATMAP % (rettangoli 20px)
+# TAB ANALISI ADELPHI – HEATMAP % (20px)
 # ===================================================================
 with tab_adelphi:
     st.header("Analisi Variazioni Settimanali – Adelphi")
@@ -353,7 +354,7 @@ with tab_insight_adelphi:
                 tooltip=["collana", "units"]
             ).properties(height=400), use_container_width=True)
 
-        # Insight aggiuntivo: Trend vendite Adelphi totale
+        # Trend totale
         st.subheader("Trend Vendite Totali Adelphi")
         trend_total = insight.groupby("week")["units"].sum().reset_index()
         st.altair_chart(alt.Chart(trend_total).mark_line(point=True).encode(
@@ -362,7 +363,7 @@ with tab_insight_adelphi:
         ).properties(height=400), use_container_width=True)
 
 # ===================================================================
-# TAB FATTURATO ADELPHI
+# TAB FATTURATO ADELPHI (con controllo se colonna esiste)
 # ===================================================================
 with tab_fatturato_adelphi:
     st.header("Insight Adelphi – Fatturato")
@@ -371,6 +372,9 @@ with tab_fatturato_adelphi:
     if fatt.empty:
         st.info("Nessun dato Adelphi.")
     else:
+        # Controllo sicuro se "fatturato" esiste (se non c'è prezzo nei file, è 0)
+        if "fatturato" not in fatt.columns:
+            fatt["fatturato"] = 0
         fatt["fatturato"] = pd.to_numeric(fatt["fatturato"], errors="coerce").fillna(0)
 
         for col in ["title", "collana"]:
