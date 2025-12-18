@@ -1,4 +1,4 @@
-# app.py → VERSIONE FINALE – FATTURATO DA COLONNA "VALUE" (già presente, con punto migliaia e virgola decimali)
+# app.py → VERSIONE FINALE – FATTURATO CORRETTO (Value se presente, altrimenti Cover price × Units)
 import streamlit as st
 import pandas as pd
 import altair as alt
@@ -30,16 +30,25 @@ if not os.path.exists(MASTER_PATH):
             units_col = next((c for c in df.columns if c in ["units","unità_vendute","vendite","unità","copie","qty"]), None)
             if not units_col: continue
             df = df.rename(columns={units_col: "units"})
+            df["units"] = pd.to_numeric(df["units"], errors="coerce").fillna(0)
 
-            # Fatturato dalla colonna "value" (colonna Q) – gestisce punto migliaia e virgola decimali
+            # Fatturato: prima tenta "value"
             value_col = next((c for c in df.columns if "value" in c.lower()), None)
             if value_col:
                 df = df.rename(columns={value_col: "fatturato"})
-                # Sostituisce punto con niente (migliaia) e virgola con punto (decimali)
+                # Gestisce punto migliaia e virgola decimali
                 df["fatturato"] = df["fatturato"].astype(str).str.replace('.', '', regex=False).str.replace(',', '.', regex=False)
                 df["fatturato"] = pd.to_numeric(df["fatturato"], errors="coerce").fillna(0)
             else:
-                df["fatturato"] = 0.0
+                # Se non c'è "value", calcola da "cover price"
+                price_col = next((c for c in df.columns if "cover" in c.lower() and "price" in c.lower()), None)
+                if price_col:
+                    df = df.rename(columns={price_col: "cover_price"})
+                    df["cover_price"] = df["cover_price"].astype(str).str.replace('.', '', regex=False).str.replace(',', '.', regex=False)
+                    df["cover_price"] = pd.to_numeric(df["cover_price"], errors="coerce").fillna(0)
+                    df["fatturato"] = df["units"] * df["cover_price"]
+                else:
+                    df["fatturato"] = 0.0
 
             df["week"] = f"Settimana {week_num.zfill(2)}"
 
@@ -86,7 +95,7 @@ tab_principale, tab_adelphi, tab_streak, tab_insight_adelphi, tab_fatturato_adel
 ])
 
 # ===================================================================
-# TAB PRINCIPALE (invariata – tutto uguale alla versione che funzionava)
+# TAB PRINCIPALE (invariata)
 # ===================================================================
 with tab_principale:
     week_options = ["Tutti"] + sorted(df_all["week"].unique(), key=lambda x: int(x.split()[-1]))
@@ -360,7 +369,7 @@ with tab_insight_adelphi:
         ).properties(height=400), use_container_width=True)
 
 # ===================================================================
-# TAB FATTURATO ADELPHI – USANDO COLONNA "VALUE" COME FATTURATO
+# TAB FATTURATO ADELPHI – FATTURATO CORRETTO (Value o Cover price × Units)
 # ===================================================================
 with tab_fatturato_adelphi:
     st.header("Insight Adelphi – Fatturato")
@@ -369,9 +378,6 @@ with tab_fatturato_adelphi:
     if fatt.empty:
         st.info("Nessun dato Adelphi.")
     else:
-        # Assicura che "fatturato" sia presente e pulito (già fatto nel parquet, ma per sicurezza)
-        if "fatturato" not in fatt.columns:
-            fatt["fatturato"] = 0
         fatt["fatturato"] = pd.to_numeric(fatt["fatturato"], errors="coerce").fillna(0)
 
         for col in ["title", "collana"]:
