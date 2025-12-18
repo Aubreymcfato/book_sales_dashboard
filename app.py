@@ -1,4 +1,4 @@
-# app.py → VERSIONE FINALE – FATTURATO CALCOLATO DA "COVER PRICE" × UNITS
+# app.py → VERSIONE FINALE – FATTURATO DA COLONNA "VALUE" (già presente, con punto migliaia e virgola decimali)
 import streamlit as st
 import pandas as pd
 import altair as alt
@@ -31,16 +31,15 @@ if not os.path.exists(MASTER_PATH):
             if not units_col: continue
             df = df.rename(columns={units_col: "units"})
 
-            # COVER PRICE → prezzo
-            price_col = next((c for c in df.columns if "cover_price" in c or "prezzo" in c or "price" in c), None)
-            if price_col:
-                df = df.rename(columns={price_col: "cover_price"})
-                df["cover_price"] = pd.to_numeric(df["cover_price"], errors="coerce").fillna(0)
+            # Fatturato dalla colonna "value" (colonna Q) – gestisce punto migliaia e virgola decimali
+            value_col = next((c for c in df.columns if "value" in c.lower()), None)
+            if value_col:
+                df = df.rename(columns={value_col: "fatturato"})
+                # Sostituisce punto con niente (migliaia) e virgola con punto (decimali)
+                df["fatturato"] = df["fatturato"].astype(str).str.replace('.', '', regex=False).str.replace(',', '.', regex=False)
+                df["fatturato"] = pd.to_numeric(df["fatturato"], errors="coerce").fillna(0)
             else:
-                df["cover_price"] = 0
-
-            # Calcolo fatturato
-            df["fatturato"] = df["units"] * df["cover_price"]
+                df["fatturato"] = 0.0
 
             df["week"] = f"Settimana {week_num.zfill(2)}"
 
@@ -49,7 +48,7 @@ if not os.path.exists(MASTER_PATH):
                     df = df.rename(columns={col: "collana"})
                     break
 
-            keep = ["title","author","publisher","units","fatturato","cover_price","week"]
+            keep = ["title","author","publisher","units","fatturato","week"]
             if "collana" in df.columns: keep.append("collana")
             dfs.append(df[keep])
         except Exception as e:
@@ -58,7 +57,6 @@ if not os.path.exists(MASTER_PATH):
     master = pd.concat(dfs, ignore_index=True)
     master["units"] = pd.to_numeric(master["units"], errors="coerce").fillna(0).astype(int)
     master["fatturato"] = pd.to_numeric(master["fatturato"], errors="coerce").fillna(0)
-    master["cover_price"] = pd.to_numeric(master["cover_price"], errors="coerce").fillna(0)
     master["title"] = master["title"].astype(str).str.strip()
     master["publisher"] = master["publisher"].astype(str).str.strip().str.title()
     if "collana" in master.columns:
@@ -88,7 +86,7 @@ tab_principale, tab_adelphi, tab_streak, tab_insight_adelphi, tab_fatturato_adel
 ])
 
 # ===================================================================
-# TAB PRINCIPALE (invariata)
+# TAB PRINCIPALE (invariata – tutto uguale alla versione che funzionava)
 # ===================================================================
 with tab_principale:
     week_options = ["Tutti"] + sorted(df_all["week"].unique(), key=lambda x: int(x.split()[-1]))
@@ -362,7 +360,7 @@ with tab_insight_adelphi:
         ).properties(height=400), use_container_width=True)
 
 # ===================================================================
-# TAB FATTURATO ADELPHI – CALCOLATO DA COVER PRICE × UNITS
+# TAB FATTURATO ADELPHI – USANDO COLONNA "VALUE" COME FATTURATO
 # ===================================================================
 with tab_fatturato_adelphi:
     st.header("Insight Adelphi – Fatturato")
@@ -371,13 +369,9 @@ with tab_fatturato_adelphi:
     if fatt.empty:
         st.info("Nessun dato Adelphi.")
     else:
-        # Assicura che fatturato sia calcolato (anche se già nel parquet)
-        if "cover_price" in fatt.columns:
-            fatt["cover_price"] = pd.to_numeric(fatt["cover_price"], errors="coerce").fillna(0)
-            fatt["fatturato"] = fatt["units"] * fatt["cover_price"]
-        else:
+        # Assicura che "fatturato" sia presente e pulito (già fatto nel parquet, ma per sicurezza)
+        if "fatturato" not in fatt.columns:
             fatt["fatturato"] = 0
-
         fatt["fatturato"] = pd.to_numeric(fatt["fatturato"], errors="coerce").fillna(0)
 
         for col in ["title", "collana"]:
