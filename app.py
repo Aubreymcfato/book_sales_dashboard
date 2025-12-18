@@ -1,4 +1,4 @@
-# app.py → VERSIONE FINALE – ERRORE FATTURATO RISOLTO (controllo se colonna esiste)
+# app.py → VERSIONE FINALE – FATTURATO CALCOLATO DA "COVER PRICE" × UNITS
 import streamlit as st
 import pandas as pd
 import altair as alt
@@ -31,14 +31,16 @@ if not os.path.exists(MASTER_PATH):
             if not units_col: continue
             df = df.rename(columns={units_col: "units"})
 
-            # Aggiungiamo prezzo e fatturato se esiste
-            price_col = next((c for c in ["price","prezzo","prezzo_copertina"] if c in df.columns), None)
+            # COVER PRICE → prezzo
+            price_col = next((c for c in df.columns if "cover_price" in c or "prezzo" in c or "price" in c), None)
             if price_col:
-                df = df.rename(columns={price_col: "price"})
-                df["price"] = pd.to_numeric(df["price"], errors="coerce").fillna(0)
-                df["fatturato"] = df["units"] * df["price"]
+                df = df.rename(columns={price_col: "cover_price"})
+                df["cover_price"] = pd.to_numeric(df["cover_price"], errors="coerce").fillna(0)
             else:
-                df["fatturato"] = 0
+                df["cover_price"] = 0
+
+            # Calcolo fatturato
+            df["fatturato"] = df["units"] * df["cover_price"]
 
             df["week"] = f"Settimana {week_num.zfill(2)}"
 
@@ -47,7 +49,7 @@ if not os.path.exists(MASTER_PATH):
                     df = df.rename(columns={col: "collana"})
                     break
 
-            keep = ["title","author","publisher","units","fatturato","week"]
+            keep = ["title","author","publisher","units","fatturato","cover_price","week"]
             if "collana" in df.columns: keep.append("collana")
             dfs.append(df[keep])
         except Exception as e:
@@ -56,6 +58,7 @@ if not os.path.exists(MASTER_PATH):
     master = pd.concat(dfs, ignore_index=True)
     master["units"] = pd.to_numeric(master["units"], errors="coerce").fillna(0).astype(int)
     master["fatturato"] = pd.to_numeric(master["fatturato"], errors="coerce").fillna(0)
+    master["cover_price"] = pd.to_numeric(master["cover_price"], errors="coerce").fillna(0)
     master["title"] = master["title"].astype(str).str.strip()
     master["publisher"] = master["publisher"].astype(str).str.strip().str.title()
     if "collana" in master.columns:
@@ -318,7 +321,7 @@ with tab_streak:
             st.altair_chart(chart_streak, use_container_width=True)
 
 # ===================================================================
-# TAB INSIGHT ADELPHI (VENDITE)
+# TAB INSIGHT ADELPHI (VENDITE) – invariata
 # ===================================================================
 with tab_insight_adelphi:
     st.header("Insight Adelphi – Vendite")
@@ -333,17 +336,14 @@ with tab_insight_adelphi:
             if filters.get(col):
                 insight = insight[insight[col].isin(filters[col])]
 
-        # Top 20 libri
         st.subheader("Top 20 Libri più venduti")
         top_libri = insight.groupby("title")["units"].sum().nlargest(20).reset_index()
         st.altair_chart(alt.Chart(top_libri).mark_bar().encode(x=alt.X("title:N",sort="-y"),y="units:Q"), use_container_width=True)
 
-        # Top 20 autori
         st.subheader("Top 20 Autori più venduti")
         top_autori = insight.groupby("author")["units"].sum().nlargest(20).reset_index()
         st.altair_chart(alt.Chart(top_autori).mark_bar().encode(x=alt.X("author:N",sort="-y"),y="units:Q"), use_container_width=True)
 
-        # Pie Collane
         if "collana" in insight.columns:
             st.subheader("Distribuzione Vendite per Collana")
             pie_collana = insight.groupby("collana")["units"].sum().reset_index()
@@ -354,7 +354,6 @@ with tab_insight_adelphi:
                 tooltip=["collana", "units"]
             ).properties(height=400), use_container_width=True)
 
-        # Trend totale
         st.subheader("Trend Vendite Totali Adelphi")
         trend_total = insight.groupby("week")["units"].sum().reset_index()
         st.altair_chart(alt.Chart(trend_total).mark_line(point=True).encode(
@@ -363,7 +362,7 @@ with tab_insight_adelphi:
         ).properties(height=400), use_container_width=True)
 
 # ===================================================================
-# TAB FATTURATO ADELPHI (con controllo se colonna esiste)
+# TAB FATTURATO ADELPHI – CALCOLATO DA COVER PRICE × UNITS
 # ===================================================================
 with tab_fatturato_adelphi:
     st.header("Insight Adelphi – Fatturato")
@@ -372,26 +371,27 @@ with tab_fatturato_adelphi:
     if fatt.empty:
         st.info("Nessun dato Adelphi.")
     else:
-        # Controllo sicuro se "fatturato" esiste (se non c'è prezzo nei file, è 0)
-        if "fatturato" not in fatt.columns:
+        # Assicura che fatturato sia calcolato (anche se già nel parquet)
+        if "cover_price" in fatt.columns:
+            fatt["cover_price"] = pd.to_numeric(fatt["cover_price"], errors="coerce").fillna(0)
+            fatt["fatturato"] = fatt["units"] * fatt["cover_price"]
+        else:
             fatt["fatturato"] = 0
+
         fatt["fatturato"] = pd.to_numeric(fatt["fatturato"], errors="coerce").fillna(0)
 
         for col in ["title", "collana"]:
             if filters.get(col):
                 fatt = fatt[fatt[col].isin(filters[col])]
 
-        # Top 20 libri per fatturato
         st.subheader("Top 20 Libri per Fatturato")
         top_fatt_libri = fatt.groupby("title")["fatturato"].sum().nlargest(20).reset_index()
         st.altair_chart(alt.Chart(top_fatt_libri).mark_bar().encode(x=alt.X("title:N",sort="-y"),y="fatturato:Q"), use_container_width=True)
 
-        # Top 20 autori per fatturato
         st.subheader("Top 20 Autori per Fatturato")
         top_fatt_autori = fatt.groupby("author")["fatturato"].sum().nlargest(20).reset_index()
         st.altair_chart(alt.Chart(top_fatt_autori).mark_bar().encode(x=alt.X("author:N",sort="-y"),y="fatturato:Q"), use_container_width=True)
 
-        # Pie Collane per fatturato
         if "collana" in fatt.columns:
             st.subheader("Distribuzione Fatturato per Collana")
             pie_fatt_collana = fatt.groupby("collana")["fatturato"].sum().reset_index()
@@ -402,7 +402,6 @@ with tab_fatturato_adelphi:
                 tooltip=["collana", "fatturato"]
             ).properties(height=400), use_container_width=True)
 
-        # Trend fatturato totale
         st.subheader("Trend Fatturato Totale Adelphi")
         trend_fatt = fatt.groupby("week")["fatturato"].sum().reset_index()
         st.altair_chart(alt.Chart(trend_fatt).mark_line(point=True).encode(
