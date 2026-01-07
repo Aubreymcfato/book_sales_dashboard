@@ -1,4 +1,4 @@
-# app.py → VERSIONE FINALE COMPLETA – FATTURATO CORRETTO + TUTTO IL CODICE
+# app.py → VERSIONE FINALE – FATTURATO CORRETTO (interpreta punto come migliaia, virgola come decimali)
 import streamlit as st
 import pandas as pd
 import altair as alt
@@ -32,18 +32,19 @@ if not os.path.exists(MASTER_PATH):
             df = df.rename(columns={units_col: "units"})
             df["units"] = pd.to_numeric(df["units"], errors="coerce").fillna(0)
 
-            # Fatturato: prima "value"
+            # Fatturato: prima "value" (formato europeo: punto = migliaia, virgola = decimali)
             value_col = next((c for c in df.columns if "value" in c.lower()), None)
             if value_col:
                 df = df.rename(columns={value_col: "fatturato"})
-                df["fatturato"] = df["fatturato"].astype(str).str.replace('.', '', regex=False).str.replace(',', '.', regex=False)
+                # Rimuove punto (migliaia) e sostituisce virgola con punto (decimali)
+                df["fatturato"] = df["fatturato"].astype(str).str.replace(r'\.', '', regex=True).str.replace(',', '.', regex=False)
                 df["fatturato"] = pd.to_numeric(df["fatturato"], errors="coerce").fillna(0)
             else:
-                # Fallback "cover price"
+                # Fallback "cover price" (stesso formato europeo)
                 price_col = next((c for c in df.columns if "cover" in c.lower() and "price" in c.lower()), None)
                 if price_col:
                     df = df.rename(columns={price_col: "cover_price"})
-                    df["cover_price"] = df["cover_price"].astype(str).str.replace('.', '', regex=False).str.replace(',', '.', regex=False)
+                    df["cover_price"] = df["cover_price"].astype(str).str.replace(r'\.', '', regex=True).str.replace(',', '.', regex=False)
                     df["cover_price"] = pd.to_numeric(df["cover_price"], errors="coerce").fillna(0)
                     df["fatturato"] = df["units"] * df["cover_price"]
                 else:
@@ -105,7 +106,7 @@ tab_principale, tab_adelphi, tab_streak, tab_insight_adelphi, tab_fatturato_adel
 ])
 
 # ===================================================================
-# TAB PRINCIPALE
+# TAB PRINCIPALE (invariata)
 # ===================================================================
 with tab_principale:
     week_options = ["Tutti"] + sorted(df_all["week"].unique(), key=lambda x: int(x.split()[-1]))
@@ -377,7 +378,7 @@ with tab_insight_adelphi:
         ).properties(height=400), use_container_width=True)
 
 # ===================================================================
-# TAB FATTURATO ADELPHI – FATTURATO SEMPRE PRESENTE
+# TAB FATTURATO ADELPHI – FATTURATO CORRETTO
 # ===================================================================
 with tab_fatturato_adelphi:
     st.header("Insight Adelphi – Fatturato")
@@ -386,7 +387,6 @@ with tab_fatturato_adelphi:
     if fatt.empty:
         st.info("Nessun dato Adelphi.")
     else:
-        # Fatturato è già calcolato nel df_all, ma per sicurezza
         fatt["fatturato"] = pd.to_numeric(fatt["fatturato"], errors="coerce").fillna(0)
 
         for col in ["title", "collana"]:
