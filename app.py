@@ -1,4 +1,4 @@
-# app.py → VERSIONE FINALE – FATTURATO CORRETTO (interpreta punto come migliaia, virgola come decimali)
+# app.py → VERSIONE FINALE – GESTIONE ANNI MULTIPLI + CONFRONTI ANNO SU ANNO
 import streamlit as st
 import pandas as pd
 import altair as alt
@@ -8,60 +8,61 @@ import glob
 import re
 
 # ================================================
-# CREAZIONE PARQUET (se non esiste)
+# CREAZIONE PARQUET (se non esiste) – GESTIONE ANNI MULTIPLI
 # ================================================
 MASTER_PATH = "data/master_sales.parquet"
 
 if not os.path.exists(MASTER_PATH):
     st.info("Creo il database master... (solo la prima volta)")
-    files = sorted(glob.glob("data/Classifica week*.xlsx"))
-    if not files:
-        st.error("Nessun file Excel trovato in data/")
-        st.stop()
-
     dfs = []
-    for f in files:
-        m = re.search(r'(?:week|Settimana)\s*(\d+)', f, re.I)
-        week_num = m.group(1) if m else "999"
-        try:
-            df = pd.read_excel(f, sheet_name="Export")
-            df.columns = [c.strip().lower().replace(" ", "_") for c in df.columns]
+    years = ["2025", "2026"]  # Aggiungi nuovi anni qui (es. "2027")
+    for year in years:
+        files = sorted(glob.glob(f"data/{year}/Classifica week*.xlsx"))
+        if not files:
+            st.warning(f"Nessun file trovato in data/{year}/ – salto l'anno")
+            continue
 
-            units_col = next((c for c in df.columns if c in ["units","unità_vendute","vendite","unità","copie","qty"]), None)
-            if not units_col: continue
-            df = df.rename(columns={units_col: "units"})
-            df["units"] = pd.to_numeric(df["units"], errors="coerce").fillna(0)
+        for f in files:
+            m = re.search(r'(?:week|Settimana)\s*(\d+)', f, re.I)
+            week_num = m.group(1) if m else "999"
+            try:
+                df = pd.read_excel(f, sheet_name="Export")
+                df.columns = [c.strip().lower().replace(" ", "_") for c in df.columns]
 
-            # Fatturato: prima "value" (formato europeo: punto = migliaia, virgola = decimali)
-            value_col = next((c for c in df.columns if "value" in c.lower()), None)
-            if value_col:
-                df = df.rename(columns={value_col: "fatturato"})
-                # Rimuove punto (migliaia) e sostituisce virgola con punto (decimali)
-                df["fatturato"] = df["fatturato"].astype(str).str.replace(r'\.', '', regex=True).str.replace(',', '.', regex=False)
-                df["fatturato"] = pd.to_numeric(df["fatturato"], errors="coerce").fillna(0)
-            else:
-                # Fallback "cover price" (stesso formato europeo)
-                price_col = next((c for c in df.columns if "cover" in c.lower() and "price" in c.lower()), None)
-                if price_col:
-                    df = df.rename(columns={price_col: "cover_price"})
-                    df["cover_price"] = df["cover_price"].astype(str).str.replace(r'\.', '', regex=True).str.replace(',', '.', regex=False)
-                    df["cover_price"] = pd.to_numeric(df["cover_price"], errors="coerce").fillna(0)
-                    df["fatturato"] = df["units"] * df["cover_price"]
+                units_col = next((c for c in df.columns if c in ["units","unità_vendute","vendite","unità","copie","qty"]), None)
+                if not units_col: continue
+                df = df.rename(columns={units_col: "units"})
+
+                # Fatturato: prima "value"
+                value_col = next((c for c in df.columns if "value" in c.lower()), None)
+                if value_col:
+                    df = df.rename(columns={value_col: "fatturato"})
+                    df["fatturato"] = df["fatturato"].astype(str).str.replace('.', '', regex=False).str.replace(',', '.', regex=False)
+                    df["fatturato"] = pd.to_numeric(df["fatturato"], errors="coerce").fillna(0)
                 else:
-                    df["fatturato"] = 0.0
+                    # Fallback "cover price"
+                    price_col = next((c for c in df.columns if "cover" in c.lower() and "price" in c.lower()), None)
+                    if price_col:
+                        df = df.rename(columns={price_col: "cover_price"})
+                        df["cover_price"] = df["cover_price"].astype(str).str.replace('.', '', regex=False).str.replace(',', '.', regex=False)
+                        df["cover_price"] = pd.to_numeric(df["cover_price"], errors="coerce").fillna(0)
+                        df["fatturato"] = df["units"] * df["cover_price"]
+                    else:
+                        df["fatturato"] = 0.0
 
-            df["week"] = f"Settimana {week_num.zfill(2)}"
+                df["week"] = f"Settimana {week_num.zfill(2)}"
+                df["year"] = int(year)
 
-            for col in ["collana","collection","series","collection/series"]:
-                if col in df.columns:
-                    df = df.rename(columns={col: "collana"})
-                    break
+                for col in ["collana","collection","series","collection/series"]:
+                    if col in df.columns:
+                        df = df.rename(columns={col: "collana"})
+                        break
 
-            keep = ["title","author","publisher","units","fatturato","week"]
-            if "collana" in df.columns: keep.append("collana")
-            dfs.append(df[keep])
-        except Exception as e:
-            st.warning(f"Errore lettura {os.path.basename(f)}: {e}")
+                keep = ["title","author","publisher","units","fatturato","week","year"]
+                if "collana" in df.columns: keep.append("collana")
+                dfs.append(df[keep])
+            except Exception as e:
+                st.warning(f"Errore lettura {os.path.basename(f)}: {e}")
 
     master = pd.concat(dfs, ignore_index=True)
     master["units"] = pd.to_numeric(master["units"], errors="coerce").fillna(0).astype(int)
@@ -75,42 +76,38 @@ if not os.path.exists(MASTER_PATH):
     st.success(f"Database master creato: {len(master):,} righe")
 
 # ================================================
-# CARICA DATABASE + RICALCOLO FATTURATO PER SICUREZZA
+# CARICA DATABASE
 # ================================================
 @st.cache_data(ttl=3600)
 def load_master():
-    df = pd.read_parquet(MASTER_PATH)
-
-    # Ricalcolo fatturato per garantire che esista (per parquet vecchi)
-    if "fatturato" not in df.columns:
-        df["fatturato"] = 0.0
-
-    if "cover_price" in df.columns:
-        df["cover_price"] = pd.to_numeric(df["cover_price"], errors="coerce").fillna(0)
-        df["fatturato"] = df["units"] * df["cover_price"]
-
-    df["fatturato"] = pd.to_numeric(df["fatturato"], errors="coerce").fillna(0)
-    return df
+    return pd.read_parquet(MASTER_PATH)
 
 df_all = load_master()
 
 st.set_page_config(page_title="Dashboard Vendite Libri", layout="wide")
 st.title("Dashboard Vendite Libri")
 
-tab_principale, tab_adelphi, tab_streak, tab_insight_adelphi, tab_fatturato_adelphi = st.tabs([
+tab_principale, tab_adelphi, tab_streak, tab_insight_adelphi, tab_fatturato_adelphi, tab_confronti_anno = st.tabs([
     "Principale", 
     "Analisi Adelphi", 
     "Streak Adelphi", 
     "Insight Adelphi (Vendite)", 
-    "Insight Adelphi (Fatturato)"
+    "Insight Adelphi (Fatturato)",
+    "Confronti Anno su Anno"
 ])
 
 # ===================================================================
-# TAB PRINCIPALE (invariata)
+# TAB PRINCIPALE
 # ===================================================================
 with tab_principale:
     week_options = ["Tutti"] + sorted(df_all["week"].unique(), key=lambda x: int(x.split()[-1]))
     selected_week = st.sidebar.selectbox("Settimana", week_options, index=0)
+
+    # Nuovo filtro Anno
+    year_options = ["Tutti"] + sorted(df_all["year"].unique().tolist())
+    selected_years = st.sidebar.multiselect("Anno", year_options, default="Tutti")
+    if "Tutti" not in selected_years:
+        df_all = df_all[df_all["year"].isin(selected_years)]
 
     st.sidebar.header("Filtri")
     filters = {}
