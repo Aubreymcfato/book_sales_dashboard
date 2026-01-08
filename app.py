@@ -376,7 +376,7 @@ with tab_insight_adelphi:
         ).properties(height=400), use_container_width=True)
 
 # ===================================================================
-# TAB CONFRONTI ANNO SU ANNO – MIGLIORATA
+# TAB CONFRONTI ANNO SU ANNO – LA PIÙ IMPORTANTE
 # ===================================================================
 with tab_confronti:
     st.header("Confronti Anno su Anno – Settimana per Settimana")
@@ -407,16 +407,8 @@ with tab_confronti:
                 pivot["Diff"] = pivot[years_list[-1]] - pivot[years_list[-2]]
                 pivot["Diff_%"] = np.where(pivot[years_list[-2]] > 0, (pivot["Diff"] / pivot[years_list[-2]]) * 100, np.nan)
 
-                def style_df(val, col):
-                    if col in ["Diff", "Diff_%"]:
-                        if val > 0:
-                            return 'background-color: green'
-                        elif val < 0:
-                            return 'background-color: red'
-                    return ''
-
-                styled_pivot = pivot.style.applymap(style_df, subset=["Diff", "Diff_%"])
-                st.dataframe(styled_pivot)
+                styled_pivot = pivot.style.background_gradient(subset=["Diff_%"], cmap="RdYlGn", vmin=-100, vmax=100).format("{:.2f}")
+                st.dataframe(styled_pivot, use_container_width=True)
 
             # Grafico per titolo (top 10 per vendite)
             st.subheader("Trend Vendite per Titolo – Confronto Anni")
