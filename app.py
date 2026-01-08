@@ -1,4 +1,4 @@
-# app.py → VERSIONE PULITA – CONFRONTI ANNO SU ANNO AL CENTRO
+# app.py → VERSIONE PULITA – CONFRONTI ANNO SU ANNO MIGLIORATI
 import streamlit as st
 import pandas as pd
 import altair as alt
@@ -15,7 +15,7 @@ MASTER_PATH = "data/master_sales.parquet"
 if not os.path.exists(MASTER_PATH):
     st.info("Creo il database master... (solo la prima volta)")
     dfs = []
-    years = ["2025", "2026"]  # Aggiungi qui nuovi anni (es. "2027")
+    years = ["2025", "2026"]  # Aggiungi nuovi anni qui (es. "2027")
     for year in years:
         files = sorted(glob.glob(f"data/{year}/Classifica week*.xlsx"))
         if not files:
@@ -38,13 +38,13 @@ if not os.path.exists(MASTER_PATH):
                 value_col = next((c for c in df.columns if "value" in c.lower()), None)
                 if value_col:
                     df = df.rename(columns={value_col: "fatturato"})
-                    df["fatturato"] = df["fatturato"].astype(str).str.replace(r'\.', '', regex=True).str.replace(',', '.', regex=False)
+                    df["fatturato"] = df["fatturato"].astype(str).str.replace('.', '', regex=False).str.replace(',', '.', regex=False)
                     df["fatturato"] = pd.to_numeric(df["fatturato"], errors="coerce").fillna(0)
                 else:
                     price_col = next((c for c in df.columns if "cover" in c.lower() and "price" in c.lower()), None)
                     if price_col:
                         df = df.rename(columns={price_col: "cover_price"})
-                        df["cover_price"] = df["cover_price"].astype(str).str.replace(r'\.', '', regex=True).str.replace(',', '.', regex=False)
+                        df["cover_price"] = df["cover_price"].astype(str).str.replace('.', '', regex=False).str.replace(',', '.', regex=False)
                         df["cover_price"] = pd.to_numeric(df["cover_price"], errors="coerce").fillna(0)
                         df["fatturato"] = df["units"] * df["cover_price"]
                     else:
@@ -64,10 +64,6 @@ if not os.path.exists(MASTER_PATH):
             except Exception as e:
                 st.warning(f"Errore lettura {os.path.basename(f)}: {e}")
 
-    if not dfs:
-        st.error("Nessun dato trovato.")
-        st.stop()
-
     master = pd.concat(dfs, ignore_index=True)
     master["units"] = pd.to_numeric(master["units"], errors="coerce").fillna(0).astype(int)
     master["fatturato"] = pd.to_numeric(master["fatturato"], errors="coerce").fillna(0)
@@ -84,10 +80,7 @@ if not os.path.exists(MASTER_PATH):
 # ================================================
 @st.cache_data(ttl=3600)
 def load_master():
-    df = pd.read_parquet(MASTER_PATH)
-    if "fatturato" not in df.columns:
-        df["fatturato"] = 0.0
-    return df
+    return pd.read_parquet(MASTER_PATH)
 
 df_all = load_master()
 
@@ -126,7 +119,6 @@ with tab_principale:
     if st.sidebar.button("Reimposta filtri"):
         st.rerun()
 
-    # Applica filtro anno
     df = df_all.copy()
     if "Tutti" not in selected_years:
         df = df[df["year"].isin(selected_years)]
@@ -143,7 +135,7 @@ with tab_principale:
     csv = df.to_csv(index=False).encode()
     c1, c2 = st.columns([4,1])
     with c1:
-        st.subheader(f"Dati – {selected_week} ({', '.join(map(str, selected_years)) if 'Tutti' not in selected_years else 'Tutti gli anni'})")
+        st.subheader(f"Dati – {selected_week}")
         st.dataframe(df.drop(columns=["source_file"], errors="ignore"), use_container_width=True)
     with c2:
         st.download_button("Scarica CSV", csv, f"vendite_{selected_week}.csv", "text/csv")
@@ -160,28 +152,59 @@ with tab_principale:
         top = df.groupby("publisher")["units"].sum().nlargest(10).reset_index()
         st.altair_chart(alt.Chart(top).mark_bar().encode(x=alt.X("publisher:N",sort="-y"),y="units:Q"), use_container_width=True)
 
-    # Andamento settimanale (solo se "Tutti" settimane)
-    if selected_week == "Tutti":
+    if selected_week == "Tutti" and any(filters.values()):
         st.subheader("Andamento Settimanale")
-        trend = []
-        for w in week_options[1:]:
-            temp = df_all[df_all["week"] == w]
-            if "Tutti" not in selected_years:
-                temp = temp[temp["year"].isin(selected_years)]
-            for col, vals in filters.items():
-                temp = temp[temp[col].isin(vals)]
-            units = int(temp["units"].sum())
-            trend.append({"Settimana": w, "Unità": units})
+        trend_cum = []
+        filter_type = None
+        filter_values = None
+        for col in ["author", "publisher", "collana", "title"]:
+            if filters.get(col):
+                filter_type = col.capitalize()
+                filter_values = filters[col]
+                break
 
-        if trend:
-            df_trend = pd.DataFrame(trend)
-            st.altair_chart(alt.Chart(df_trend).mark_line(point=True).encode(
-                x=alt.X("Settimana:N", sort=week_options[1:]),
-                y="Unità:Q"
-            ).properties(height=500), use_container_width=True)
+        if filter_type and filter_values:
+            for w in week_options[1:]:
+                temp = df_all[df_all["week"]==w]
+                for val in filter_values:
+                    temp_val = temp[temp[col] == val]
+                    units = int(temp_val["units"].sum())
+                    trend_cum.append({"Settimana": w, "Unità": units, "Item": val})
+
+            if trend_cum:
+                df_cum = pd.DataFrame(trend_cum)
+                st.subheader(f"Andamento cumulativo per {filter_type}")
+                st.altair_chart(alt.Chart(df_cum).mark_line(point=True).encode(
+                    x=alt.X("Settimana:N", sort=week_options[1:]),
+                    y="Unità:Q",
+                    color="Item:N",
+                    tooltip=["Settimana", "Unità", "Item"]
+                ).properties(height=500), use_container_width=True)
+
+        if filters.get("author") or filters.get("collana"):
+            trend_books = []
+            for w in week_options[1:]:
+                temp = df_all[df_all["week"]==w]
+                for col, vals in filters.items():
+                    if col in ["author", "collana"]:
+                        temp = temp[temp[col].isin(vals)]
+                for title in temp["title"].unique():
+                    temp_title = temp[temp["title"] == title]
+                    units = int(temp_title["units"].sum())
+                    trend_books.append({"Settimana": w, "Unità": units, "Libro": title})
+
+            if trend_books:
+                df_books = pd.DataFrame(trend_books)
+                st.subheader("Andamento per singolo libro")
+                st.altair_chart(alt.Chart(df_books).mark_line(point=True).encode(
+                    x=alt.X("Settimana:N", sort=week_options[1:]),
+                    y="Unità:Q",
+                    color="Libro:N",
+                    tooltip=["Settimana", "Unità", "Libro"]
+                ).properties(height=600), use_container_width=True)
 
 # ===================================================================
-# TAB ANALISI ADELPHI – invariata
+# TAB ANALISI ADELPHI – HEATMAP % (20px)
 # ===================================================================
 with tab_adelphi:
     st.header("Analisi Variazioni Settimanali – Adelphi")
@@ -190,8 +213,8 @@ with tab_adelphi:
     if adelphi.empty:
         st.info("Nessun dato Adelphi trovato.")
     else:
-        if "Tutti" not in selected_years:
-            adelphi = adelphi[adelphi["year"].isin(selected_years)]
+        adelphi["units"] = pd.to_numeric(adelphi["units"], errors="coerce").fillna(0)
+
         for col in ["title", "collana"]:
             if filters.get(col):
                 adelphi = adelphi[adelphi[col].isin(filters[col])]
@@ -220,7 +243,7 @@ with tab_adelphi:
 
         if not long.empty:
             num_books = long[idx].nunique()
-            dynamic_height = max(600, num_books * 20)
+            dynamic_height = max(600, num_books * 20)  # 20px per libro
 
             chart = alt.Chart(long).mark_rect(
                 stroke='gray',
@@ -229,18 +252,18 @@ with tab_adelphi:
                 x=alt.X("week:N", sort=week_options[1:], title="Settimana"),
                 y=alt.Y(f"{idx}:N", sort=alt.EncodingSortField(field="units", op="sum", order="descending")),
                 color=alt.Color("Diff_%:Q", scale=alt.Scale(scheme="redyellowgreen", domainMid=0), title="Variazione %"),
-                tooltip=[idx, "week", alt.Tooltip("units:Q", title="Unità vendute"), alt.Tooltip("Diff_%:Q", format=".1f")]
+                tooltip=[idx, "week", alt.Tooltip("units:Q", title="Unità vendute"), alt.Tooltip("Diff_%:Q", format=".1f", title="Variazione %")]
             ).properties(
                 width=900,
                 height=dynamic_height
-            )
+            ).configure_axis(labelFontSize=11, titleFontSize=13)
 
             st.altair_chart(chart, use_container_width=True)
 
         st.dataframe(adelphi[["title","collana","week","units","Diff_%"]].sort_values(["title","week"]))
 
 # ===================================================================
-# TAB STREAK ADELPHI – invariata
+# TAB STREAK ADELPHI – CLASSIFICA SOPRA + HEATMAP VERDE/ROSSO/BIANCO (20px)
 # ===================================================================
 with tab_streak:
     st.header("Streak Adelphi – Crescita/Declino Continuo")
@@ -249,8 +272,8 @@ with tab_streak:
     if streak_data.empty:
         st.info("Nessun dato Adelphi trovato.")
     else:
-        if "Tutti" not in selected_years:
-            streak_data = streak_data[streak_data["year"].isin(selected_years)]
+        streak_data["units"] = pd.to_numeric(streak_data["units"], errors="coerce").fillna(0)
+
         for col in ["title", "collana"]:
             if filters.get(col):
                 streak_data = streak_data[streak_data[col].isin(filters[col])]
@@ -272,7 +295,7 @@ with tab_streak:
             streak_data["title_collana"] = streak_data["title"] + " (" + streak_data["collana"].fillna("—") + ")"
             idx = "title_collana"
 
-        st.subheader("Top 20 Streak Positive")
+        st.subheader("Top 20 Streak Positive (settimane consecutive di crescita)")
         streak_calc = streak_data.copy()
         streak_calc["is_up"] = (streak_calc["diff"] > 0).astype(int)
         streak_calc["streak_group"] = (streak_calc["is_up"] != streak_calc["is_up"].shift()).cumsum()
@@ -294,7 +317,7 @@ with tab_streak:
 
         if not long_color.empty:
             num_books = long_color[idx].nunique()
-            dynamic_height = max(600, num_books * 20)
+            dynamic_height = max(600, num_books * 20)  # 20px per libro
 
             chart_streak = alt.Chart(long_color).mark_rect(
                 stroke='gray',
@@ -312,7 +335,7 @@ with tab_streak:
             st.altair_chart(chart_streak, use_container_width=True)
 
 # ===================================================================
-# TAB INSIGHT ADELPHI (VENDITE) – invariata
+# TAB INSIGHT ADELPHI (VENDITE)
 # ===================================================================
 with tab_insight_adelphi:
     st.header("Insight Adelphi – Vendite")
@@ -321,8 +344,8 @@ with tab_insight_adelphi:
     if insight.empty:
         st.info("Nessun dato Adelphi.")
     else:
-        if "Tutti" not in selected_years:
-            insight = insight[insight["year"].isin(selected_years)]
+        insight["units"] = pd.to_numeric(insight["units"], errors="coerce").fillna(0)
+
         for col in ["title", "collana"]:
             if filters.get(col):
                 insight = insight[insight[col].isin(filters[col])]
@@ -346,52 +369,69 @@ with tab_insight_adelphi:
             ).properties(height=400), use_container_width=True)
 
         st.subheader("Trend Vendite Totali Adelphi")
-        trend_total = insight.groupby(["year", "week"])["units"].sum().reset_index()
+        trend_total = insight.groupby("week")["units"].sum().reset_index()
+        st.altair_chart(alt.Chart(trend_total).mark_line(point=True).encode(
+            x=alt.X("week:N", sort=week_options[1:]),
+            y="units:Q"
+        ).properties(height=400), use_container_width=True)
+
+# ===================================================================
+# TAB CONFRONTI ANNO SU ANNO – MIGLIORATA
+# ===================================================================
+with tab_confronti:
+    st.header("Confronti Anno su Anno – Settimana per Settimana")
+
+    confronto = df_all[df_all["publisher"].str.contains("Adelphi", case=False, na=False)].copy()
+    if confronto.empty:
+        st.info("Nessun dato Adelphi.")
+    else:
+        for col in ["title", "collana"]:
+            if filters.get(col):
+                confronto = confronto[confronto[col].isin(filters[col])]
+
+        # Grafico totale vendite anno su anno
+        st.subheader("Trend Vendite Totali – Confronto Anni")
+        trend_total = confronto.groupby(["year", "week"])["units"].sum().reset_index()
         st.altair_chart(alt.Chart(trend_total).mark_line(point=True).encode(
             x=alt.X("week:N", sort=week_options[1:]),
             y="units:Q",
             color="year:N"
         ).properties(height=500), use_container_width=True)
 
-# ===================================================================
-# TAB CONFRONTI ANNO SU ANNO – LA PIÙ IMPORTANTE
-# ===================================================================
-with tab_confronti:
-    st.header("Confronti Anno su Anno – Settimana per Settimana")
+        # Tabella per titoli con confronto, differenza, %, colori
+        st.subheader("Confronto per Titolo")
+        if confronto["title"].nunique() > 0:
+            pivot = confronto.pivot_table(index="title", columns="year", values="units", aggfunc="sum").fillna(0)
+            years_list = sorted(pivot.columns)
+            if len(years_list) >= 2:
+                pivot["Diff"] = pivot[years_list[-1]] - pivot[years_list[-2]]
+                pivot["Diff_%"] = np.where(pivot[years_list[-2]] > 0, (pivot["Diff"] / pivot[years_list[-2]]) * 100, np.nan)
 
-    confronto = df_all.copy()
+                def style_df(val, col):
+                    if col in ["Diff", "Diff_%"]:
+                        if val > 0:
+                            return 'background-color: green'
+                        elif val < 0:
+                            return 'background-color: red'
+                    return ''
 
-    # Applica filtro anno
-    if "Tutti" not in selected_years:
-        confronto = confronto[confronto["year"].isin(selected_years)]
+                styled_pivot = pivot.style.applymap(style_df, subset=["Diff", "Diff_%"])
+                st.dataframe(styled_pivot)
 
-    # Applica altri filtri
-    for col, vals in filters.items():
-        confronto = confronto[confronto[col].isin(vals)]
+            # Grafico per titolo (top 10 per vendite)
+            st.subheader("Trend Vendite per Titolo – Confronto Anni")
+            top_titles = confronto.groupby("title")["units"].sum().nlargest(10).index
+            top_confronto = confronto[confronto["title"].isin(top_titles)]
+            chart_title = alt.Chart(top_confronto).mark_line(point=True).encode(
+                x=alt.X("week:N", sort=week_options[1:]),
+                y="units:Q",
+                color="year:N",
+                detail="title:N",
+                tooltip=["title", "week", "year", "units"]
+            ).properties(height=500)
+            st.altair_chart(chart_title, use_container_width=True)
 
-    if confronto.empty:
-        st.info("Nessun dato per il confronto con i filtri selezionati.")
-    else:
-        # Aggrega per settimana e anno
-        agg = confronto.groupby(["week", "year"])["units"].sum().reset_index()
+        else:
+            st.info("Nessun titolo da confrontare.")
 
-        # Grafico confronto anno su anno
-        st.subheader("Vendite per Settimana – Confronto tra Anni")
-        chart = alt.Chart(agg).mark_line(point=True).encode(
-            x=alt.X("week:N", sort=week_options[1:], title="Settimana"),
-            y=alt.Y("units:Q", title="Unità vendute"),
-            color=alt.Color("year:N", title="Anno"),
-            tooltip=["week", "year", "units"]
-        ).properties(
-            height=600,
-            width=900
-        )
-
-        st.altair_chart(chart, use_container_width=True)
-
-        # Tabella riassuntiva
-        st.subheader("Tabella Dati Anno su Anno")
-        pivot_table = agg.pivot(index="week", columns="year", values="units").fillna(0).reset_index()
-        st.dataframe(pivot_table, use_container_width=True)
-
-st.success("Dashboard aggiornata – confronti anno su anno pronti!")
+st.success("Dashboard aggiornata – tutto perfetto!")
